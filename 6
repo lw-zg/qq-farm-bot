@@ -1,0 +1,256 @@
+From 9e1648bb29a163694c249fe80814058b5b501db6 Mon Sep 17 00:00:00 2001
+From: lw-zg <lw-zg@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 15:06:26 +0800
+Subject: [PATCH 6/9] feat(web): embed activity automation switches into
+ activity pages
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Add a shared ActivityAutomation component (loads/saves per-account
+settings with optimistic toggle + revert on failure) and place it on
+the activity pages themselves:
+- MilkTeaPage: new '自动化' tab after 我的工作 (cashier/wages/fund)
+- ShareRewardActivity: bottom section (share/daily/milestones)
+- TravelPassTab: battle-pass claim switch
+- SolarTermsTab: solar-term claim switch
+---
+ .../activity/ActivityAutomation.vue           | 94 +++++++++++++++++++
+ .../activity/ShareRewardActivity.vue          | 13 +++
+ web/src/components/activity/SolarTermsTab.vue |  7 ++
+ web/src/components/activity/TravelPassTab.vue |  7 ++
+ web/src/views/activity-center/MilkTeaPage.vue | 11 ++-
+ 5 files changed, 130 insertions(+), 2 deletions(-)
+ create mode 100644 web/src/components/activity/ActivityAutomation.vue
+
+diff --git a/web/src/components/activity/ActivityAutomation.vue b/web/src/components/activity/ActivityAutomation.vue
+new file mode 100644
+index 0000000..f6281e4
+--- /dev/null
++++ b/web/src/components/activity/ActivityAutomation.vue
+@@ -0,0 +1,94 @@
++<script setup lang="ts">
++import { onMounted, ref } from 'vue'
++import { useAccountStore } from '@/stores/account'
++import { useSettingStore } from '@/stores/setting'
++import BaseSwitch from '@/components/ui/BaseSwitch.vue'
++
++export interface ActivityAutomationItem { key: string, label: string }
++
++const props = withDefaults(defineProps<{
++  items: ActivityAutomationItem[]
++  title?: string
++}>(), { title: '自动化' })
++
++const accountStore = useAccountStore()
++const settingStore = useSettingStore()
++
++const loadState = ref<'loading' | 'ready' | 'error'>('loading')
++const loadError = ref('')
++const saveError = ref('')
++const savingKey = ref('')
++
++onMounted(async () => {
++  const accountId = String(accountStore.currentAccountId || '')
++  if (!accountId) {
++    loadState.value = 'error'
++    loadError.value = '请先选择账号'
++    return
++  }
++  const ok = await settingStore.fetchSettings(accountId)
++  loadState.value = ok ? 'ready' : 'error'
++  if (!ok)
++    loadError.value = '自动化设置加载失败'
++})
++
++function isEnabled(key: string): boolean {
++  return !!(settingStore.settings?.automation as any)?.[key]
++}
++
++async function toggle(item: ActivityAutomationItem) {
++  const accountId = String(accountStore.currentAccountId || '')
++  if (!accountId || savingKey.value)
++    return
++  const previous = isEnabled(item.key)
++  const next = !previous
++  ;(settingStore.settings.automation as any)[item.key] = next
++  savingKey.value = item.key
++  saveError.value = ''
++  try {
++    const result = await settingStore.saveSettings(accountId, {
++      automation: { ...(settingStore.settings.automation as any), [item.key]: next },
++    })
++    if (!result?.ok) {
++      ;(settingStore.settings.automation as any)[item.key] = previous
++      saveError.value = result?.error || '保存失败'
++    }
++  }
++  catch (error: any) {
++    ;(settingStore.settings.automation as any)[item.key] = previous
++    saveError.value = error?.message || '保存失败'
++  }
++  finally {
++    savingKey.value = ''
++  }
++}
++</script>
++
++<template>
++  <section class="rounded-2xl border border-gray-100 bg-white/80 p-4 text-sm dark:border-gray-700 dark:bg-gray-900/40">
++    <header class="flex flex-wrap items-baseline justify-between gap-2">
++      <strong class="text-gray-900 dark:text-gray-100">{{ props.title }}</strong>
++      <span class="text-xs text-gray-500 dark:text-gray-400">每 30 分钟自动检查，条件不满足或活动结束自动跳过</span>
++    </header>
++    <p v-if="loadState === 'loading'" class="mt-2 text-xs text-gray-500 dark:text-gray-400">
++      正在加载设置…
++    </p>
++    <p v-else-if="loadState === 'error'" class="mt-2 text-xs text-red-500">
++      {{ loadError }}
++    </p>
++    <template v-else>
++      <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
++        <BaseSwitch
++          v-for="item in props.items"
++          :key="item.key"
++          :model-value="isEnabled(item.key)"
++          :label="item.label"
++          @update:model-value="toggle(item)"
++        />
++      </div>
++      <p v-if="saveError" class="mt-2 text-xs text-red-500">
++        {{ saveError }}
++      </p>
++    </template>
++  </section>
++</template>
+diff --git a/web/src/components/activity/ShareRewardActivity.vue b/web/src/components/activity/ShareRewardActivity.vue
+index b9b345d..86402bd 100644
+--- a/web/src/components/activity/ShareRewardActivity.vue
++++ b/web/src/components/activity/ShareRewardActivity.vue
+@@ -3,12 +3,19 @@ import type { CommerceItemDto } from '@/stores/commerce'
+ import { storeToRefs } from 'pinia'
+ import { computed, onUnmounted, ref, watch } from 'vue'
+ import api from '@/api'
++import ActivityAutomation from '@/components/activity/ActivityAutomation.vue'
+ import ActivityHeader from '@/components/activity/ActivityHeader.vue'
+ import ActivityShell from '@/components/activity/ActivityShell.vue'
+ import CommerceItemImage from '@/components/commerce/CommerceItemImage.vue'
+ import { useAccountStore } from '@/stores/account'
+ import { useToastStore } from '@/stores/toast'
+ 
++const automationItems = [
++  { key: 'activity_share_reward_share', label: '自动分享得快乐值' },
++  { key: 'activity_share_reward_daily', label: '自动领每日快乐值' },
++  { key: 'activity_share_reward_milestones', label: '自动领档位奖励' },
++]
++
+ interface ShareRewardState {
+   id: string
+   title: string
+@@ -222,6 +229,12 @@ onUnmounted(() => sequence++)
+             </p>
+           </details>
+         </div>
++        <ActivityAutomation
++          v-if="state"
++          class="share-automation"
++          title="快乐不独享自动化"
++          :items="automationItems"
++        />
+       </main>
+     </div>
+   </ActivityShell>
+diff --git a/web/src/components/activity/SolarTermsTab.vue b/web/src/components/activity/SolarTermsTab.vue
+index 810f409..6d75adc 100644
+--- a/web/src/components/activity/SolarTermsTab.vue
++++ b/web/src/components/activity/SolarTermsTab.vue
+@@ -1,8 +1,13 @@
+ <script setup lang="ts">
+ import type { SolarTermsDto } from '@/stores/activity-center'
+ import { computed, ref, watch } from 'vue'
++import ActivityAutomation from '@/components/activity/ActivityAutomation.vue'
+ import RewardItem from './RewardItem.vue'
+ 
++const automationItems = [
++  { key: 'activity_solar_term_claim', label: '自动领取节气奖励' },
++]
++
+ const props = defineProps<{ solar: SolarTermsDto | null, now: number, pending?: boolean }>()
+ const emit = defineEmits<{ claim: [termId: string] }>()
+ const selectedId = ref('')
+@@ -86,6 +91,8 @@ function claim() {
+         {{ buttonLabel }}
+       </button>
+     </section>
++
++    <ActivityAutomation :items="automationItems" title="节气自动化" />
+   </div>
+ </template>
+ 
+diff --git a/web/src/components/activity/TravelPassTab.vue b/web/src/components/activity/TravelPassTab.vue
+index 585c72f..5bc67fd 100644
+--- a/web/src/components/activity/TravelPassTab.vue
++++ b/web/src/components/activity/TravelPassTab.vue
+@@ -1,9 +1,14 @@
+ <script setup lang="ts">
+ import type { SeasonDto } from '@/stores/activity-center'
+ import { computed, ref } from 'vue'
++import ActivityAutomation from '@/components/activity/ActivityAutomation.vue'
+ import RewardItem from './RewardItem.vue'
+ import TravelRulesDialog from './TravelRulesDialog.vue'
+ 
++const automationItems = [
++  { key: 'activity_battle_pass_claim', label: '自动领取游记通行证奖励' },
++]
++
+ const props = defineProps<{
+   season: SeasonDto | null
+   pending?: boolean
+@@ -71,6 +76,8 @@ const canClaim = computed(() => Boolean(props.enabled && hasClaimableNode.value
+     </div>
+ 
+     <TravelRulesDialog :open="rulesOpen" :rules="pass?.rules || { title: '活动说明', paragraphs: [] }" @close="rulesOpen = false" />
++
++    <ActivityAutomation :items="automationItems" title="游记自动化" />
+   </div>
+ </template>
+ 
+diff --git a/web/src/views/activity-center/MilkTeaPage.vue b/web/src/views/activity-center/MilkTeaPage.vue
+index 80a3f05..90a4c83 100644
+--- a/web/src/views/activity-center/MilkTeaPage.vue
++++ b/web/src/views/activity-center/MilkTeaPage.vue
+@@ -2,6 +2,7 @@
+ import { storeToRefs } from 'pinia'
+ import { computed, nextTick, onUnmounted, ref, watch } from 'vue'
+ import api from '@/api'
++import ActivityAutomation from '@/components/activity/ActivityAutomation.vue'
+ import ActivityHeader from '@/components/activity/ActivityHeader.vue'
+ import ActivityShell from '@/components/activity/ActivityShell.vue'
+ import CommerceItemImage from '@/components/commerce/CommerceItemImage.vue'
+@@ -25,7 +26,12 @@ const confirmElement = ref<HTMLElement | null>(null)
+ let returnFocus: HTMLElement | null = null
+ let sequence = 0
+ let filters: any = {}
+-const tabs: Array<[string, string]> = [['shop', '我的店铺'], ['exchange', '兑换商店'], ['work', '我的工作']]
++const tabs: Array<[string, string]> = [['shop', '我的店铺'], ['exchange', '兑换商店'], ['work', '我的工作'], ['auto', '自动化']]
++const automationItems = [
++  { key: 'activity_milk_tea_cashier_claim', label: '自动领取门店收益' },
++  { key: 'activity_milk_tea_wages_claim', label: '自动领取员工工资' },
++  { key: 'activity_milk_tea_fund_claim', label: '自动领取成长基金奖励' },
++]
+ const panelTitles: Record<string, string> = { settings: '店铺设置', upgrade: '店铺升级', fund: '成长基金', workshop: '奶茶工坊', hireList: '好友雇佣', logs: '营业记录', rank: '排行榜', workItems: '工作事项' }
+ // 列表型弹窗在宽屏下加宽，每一项横向展开成一行
+ const widePanels = ['upgrade', 'workshop', 'fund']
+@@ -211,7 +217,8 @@ onUnmounted(() => sequence++)
+         </div>
+       </div>
+       <main class="tea-scroll">
+-        <MilkTeaContent v-if="mainState" :key="mainPage" :state="mainState" :page="mainPage" :busy="busy" @navigate="navigate" @operation="request" @confirmation="select" @reload="reload" />
++        <ActivityAutomation v-if="mainPage === 'auto'" :items="automationItems" title="奶茶活动自动化" />
++        <MilkTeaContent v-else-if="mainState" :key="mainPage" :state="mainState" :page="mainPage" :busy="busy" @navigate="navigate" @operation="request" @confirmation="select" @reload="reload" />
+         <div v-else class="empty">
+           <span>{{ !currentAccountId ? '请先选择账号' : busy ? '正在加载…' : '暂未获取到活动数据' }}</span><button v-if="currentAccountId && !busy" @click="request()">
+             重新加载
+-- 
+2.56.0
+

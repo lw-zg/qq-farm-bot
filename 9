@@ -1,0 +1,971 @@
+From 45cf1bed6ea126db349632b475abbcd17f7a399e Mon Sep 17 00:00:00 2001
+From: lw-zg <lw-zg@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 16:33:47 +0800
+Subject: [PATCH 9/9] feat: scene bubble ops, manual refresh input, pet capital
+ mode, gold units, auto-rebase workflow
+
+---
+ core/src/controllers/admin/farm-routes.ts |  34 +++++
+ core/src/core/worker.ts                   |  23 +++
+ core/src/models/store/account-config.ts   |  23 ++-
+ core/src/models/store/index.ts            |   2 +
+ core/src/models/store/shared-state.ts     |  19 ++-
+ core/src/runtime/data-provider.ts         |   9 ++
+ core/src/services/capital-mode.ts         | 116 ++++++++++++++
+ core/src/services/farm/scheduler.ts       |   7 +
+ core/src/types/config.ts                  |  10 ++
+ web/src/components/FarmPanel.vue          |  62 +++++++-
+ web/src/components/PetPanel.vue           | 177 +++++++++++++++++++++-
+ web/src/stores/farm.ts                    |  17 +++
+ web/src/stores/pet.ts                     |  84 ++++++++++
+ web/src/utils/number-format.ts            |  28 ++++
+ web/src/views/Dashboard.vue               |   4 +-
+ 15 files changed, 608 insertions(+), 7 deletions(-)
+ create mode 100644 core/src/services/capital-mode.ts
+ create mode 100644 web/src/utils/number-format.ts
+
+diff --git a/core/src/controllers/admin/farm-routes.ts b/core/src/controllers/admin/farm-routes.ts
+index ff9f2de..0a3a96d 100644
+--- a/core/src/controllers/admin/farm-routes.ts
++++ b/core/src/controllers/admin/farm-routes.ts
+@@ -485,6 +485,40 @@ function mountFarmRoutes(app: Application, ctx: AdminContext): void {
+         }
+     });
+ 
++    // API: 宠物资本模式配置（收获前自动派狗、收获后召回）。
++    app.get('/api/pets/capital-mode', async (req: Request, res: Response) => {
++        const id = getAccId(ctx, req);
++        if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
++        try {
++            res.json({ ok: true, data: await ctx.provider.getCapitalMode(id) });
++        } catch (e: any) {
++            handleApiError(res, e);
++        }
++    });
++
++    app.post('/api/pets/capital-mode', async (req: Request, res: Response) => {
++        const id = getAccId(ctx, req);
++        if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
++        try {
++            const capitalMode = await ctx.provider.setCapitalMode(id, req.body || {});
++            res.json({ ok: true, data: { capitalMode } });
++        } catch (e: any) {
++            handleApiError(res, e);
++        }
++    });
++
++    // API: 铲除指定地块作物（PlantService.RemovePlant）。
++    app.post('/api/farm/remove-plants', async (req: Request, res: Response) => {
++        const id = getAccId(ctx, req);
++        if (!id) return res.status(400).json({ ok: false, error: 'Missing x-account-id' });
++        try {
++            const landIds = Array.isArray(req.body?.landIds) ? req.body.landIds : [];
++            res.json({ ok: true, data: await ctx.provider.removePlants(id, landIds) });
++        } catch (e: any) {
++            handleApiError(res, e);
++        }
++    });
++
+     // API: 获取宠物页守护记录（DogService.GetProtectLogs，真实点击抓包确认）。
+     app.get('/api/pets/protect-logs', async (req: Request, res: Response) => {
+         const id = getAccId(ctx, req);
+diff --git a/core/src/core/worker.ts b/core/src/core/worker.ts
+index 798dc8f..66729c6 100644
+--- a/core/src/core/worker.ts
++++ b/core/src/core/worker.ts
+@@ -485,9 +485,17 @@ function applyRuntimeConfig(snapshot: any, syncNow: boolean = false): number {
+     if (!loginReady && snapshot && snapshot.systemClientVersion !== undefined) {
+         updateRuntimeConfig({ clientVersion: String(snapshot.systemClientVersion || '') });
+     }
++    const hasCapitalModePayload = !!(snapshot && snapshot.capitalMode && typeof snapshot.capitalMode === 'object');
++    const prevCapitalMode = hasCapitalModePayload ? require('../models/store').getCapitalMode() : null;
+     applyConfigSnapshot(snapshot || {}, { persist: false, accountId });
+     if (rev > appliedConfigRevision) appliedConfigRevision = rev;
+ 
++    // 宠物资本模式配置变化时，若自动派出的狗还在外面则召回
++    if (hasCapitalModePayload) {
++        const nextCapitalMode = require('../models/store').getCapitalMode();
++        require('../services/capital-mode').reconcileConfigChange(prevCapitalMode, nextCapitalMode).catch(() => null);
++    }
++
+     // 优先使用本次下发的间隔，避免 worker 内部 store 漂移导致回退默认值
+     const incomingIntervals = (snapshot && snapshot.intervals && typeof snapshot.intervals === 'object')
+         ? snapshot.intervals
+@@ -923,9 +931,11 @@ async function handleApiCall(msg: any): Promise<void> {
+                 result = await require('../services/pets').activateDog(args[0]);
+                 break;
+             case 'deployDog':
++                require('../services/capital-mode').releaseForManualCommand();
+                 result = await require('../services/pets').deployDog(args[0]);
+                 break;
+             case 'withdrawDog':
++                require('../services/capital-mode').releaseForManualCommand();
+                 result = await require('../services/pets').withdrawDog();
+                 break;
+             case 'useDogFood':
+@@ -940,6 +950,19 @@ async function handleApiCall(msg: any): Promise<void> {
+                 result = getAutomation();
+                 break;
+             }
++            case 'getCapitalMode':
++                result = require('../models/store').getCapitalMode();
++                break;
++            case 'setCapitalMode':
++                applyRuntimeConfig({ capitalMode: (args && args[0]) || {} }, true);
++                result = require('../models/store').getCapitalMode();
++                break;
++            case 'removePlants': {
++                const landIds = (Array.isArray(args[0]) ? args[0] : []).map((v: any) => Number(v) || 0).filter((v: number) => v > 0);
++                if (!landIds.length) throw new Error('请选择要铲除的地块');
++                result = await require('../services/farm/api').removePlant(landIds);
++                break;
++            }
+             case 'doFarmOp':
+                 result = await runFarmOperation(args[0], args[1], args[2] === true); // opType, optional targetLandId
+                 break;
+diff --git a/core/src/models/store/account-config.ts b/core/src/models/store/account-config.ts
+index 4be356b..f5e8031 100644
+--- a/core/src/models/store/account-config.ts
++++ b/core/src/models/store/account-config.ts
+@@ -1,4 +1,4 @@
+-import type { AccountConfig, AutomationConfig, BagSeedFallbackStrategy, FertilizerLandType, IntervalConfig, PlantingStrategy, QuietHoursConfig } from '../../types/config';
++import type { AccountConfig, AutomationConfig, BagSeedFallbackStrategy, CapitalModeConfig, FertilizerLandType, IntervalConfig, PlantingStrategy, QuietHoursConfig } from '../../types/config';
+ export {};
+ 
+ const sharedState = require('./shared-state');
+@@ -93,6 +93,7 @@ function getConfigSnapshot(accountId?: unknown): AccountConfig & { ui: typeof gl
+         preferredSeedId: cfg.preferredSeedId,
+         intervals: { ...cfg.intervals },
+         friendQuietHours: { ...cfg.friendQuietHours },
++        capitalMode: { ...cfg.capitalMode },
+         knownFriendGids: [...(cfg.knownFriendGids || [])],
+         knownFriendGidSyncCooldownSec: cfg.knownFriendGidSyncCooldownSec,
+         friendsListCacheTtlSec: cfg.friendsListCacheTtlSec,
+@@ -177,6 +178,15 @@ function applyConfigSnapshot(snapshot: Record<string, any> | undefined, options:
+         };
+     }
+ 
++    if (cfg.capitalMode && typeof cfg.capitalMode === 'object') {
++        const old: CapitalModeConfig = next.capitalMode || { enabled: false, dogId: 0, leadSeconds: 10 };
++        next.capitalMode = {
++            enabled: cfg.capitalMode.enabled !== undefined ? !!cfg.capitalMode.enabled : !!old.enabled,
++            dogId: Math.max(0, Number(cfg.capitalMode.dogId ?? old.dogId) || 0),
++            leadSeconds: Math.max(5, Math.min(300, Number(cfg.capitalMode.leadSeconds ?? old.leadSeconds) || 10)),
++        };
++    }
++
+     if (Array.isArray(cfg.friendBlacklist)) {
+         next.friendBlacklist = cfg.friendBlacklist.map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
+     }
+@@ -327,6 +337,15 @@ function getFriendQuietHours(accountId?: unknown): QuietHoursConfig {
+     return { ...getAccountConfigSnapshot(accountId).friendQuietHours };
+ }
+ 
++function getCapitalMode(accountId?: unknown): CapitalModeConfig {
++    return { ...getAccountConfigSnapshot(accountId).capitalMode };
++}
++
++function setCapitalMode(config: unknown, accountId?: unknown): CapitalModeConfig {
++    applyConfigSnapshot({ capitalMode: (config && typeof config === 'object') ? config : {} }, { accountId });
++    return getCapitalMode(accountId);
++}
++
+ function getKnownFriendGids(accountId?: unknown): number[] {
+     const config = getAccountConfigSnapshot(accountId);
+     const configGids = config.knownFriendGids || [];
+@@ -485,6 +504,8 @@ module.exports = {
+     getAutomation,
+     setAutomation,
+     isAutomationOn,
++    getCapitalMode,
++    setCapitalMode,
+     getPreferredSeed,
+     getPlantingStrategy,
+     getBagSeedPriority,
+diff --git a/core/src/models/store/index.ts b/core/src/models/store/index.ts
+index 04f3c12..3879cc6 100644
+--- a/core/src/models/store/index.ts
++++ b/core/src/models/store/index.ts
+@@ -11,6 +11,8 @@ module.exports = {
+     getAutomation: accountConfig.getAutomation,
+     setAutomation: accountConfig.setAutomation,
+     isAutomationOn: accountConfig.isAutomationOn,
++    getCapitalMode: accountConfig.getCapitalMode,
++    setCapitalMode: accountConfig.setCapitalMode,
+     getPreferredSeed: accountConfig.getPreferredSeed,
+     getPlantingStrategy: accountConfig.getPlantingStrategy,
+     getBagSeedPriority: accountConfig.getBagSeedPriority,
+diff --git a/core/src/models/store/shared-state.ts b/core/src/models/store/shared-state.ts
+index 2207324..436501a 100644
+--- a/core/src/models/store/shared-state.ts
++++ b/core/src/models/store/shared-state.ts
+@@ -1,4 +1,4 @@
+-import type { AccountConfig, AutomationConfig, BagSeedFallbackStrategy, FertilizerLandType, GlobalConfig, IntervalConfig, LoginSettings, OfflineReminder, PlantingStrategy, QuietHoursConfig } from '../../types/config';
++import type { AccountConfig, AutomationConfig, BagSeedFallbackStrategy, CapitalModeConfig, FertilizerLandType, GlobalConfig, IntervalConfig, LoginSettings, OfflineReminder, PlantingStrategy, QuietHoursConfig } from '../../types/config';
+ export {};
+ 
+ const { DEFAULT_TIME_ZONE, normalizeTimeZone, resolveClientVersion } = require('../../config/config');
+@@ -109,6 +109,11 @@ const DEFAULT_ACCOUNT_CONFIG: AccountConfig = {
+         end: '07:30',
+         continueFarm: true,
+     },
++    capitalMode: {
++        enabled: false,
++        dogId: 0,
++        leadSeconds: 10,
++    },
+     knownFriendGids: [],
+     knownFriendGidSyncCooldownSec: DEFAULT_KNOWN_FRIEND_GID_SYNC_COOLDOWN_SEC,
+     friendsListCacheTtlSec: DEFAULT_FRIENDS_LIST_CACHE_TTL_SEC,
+@@ -312,6 +317,7 @@ function cloneAccountConfig(base: Partial<AccountConfig> = DEFAULT_ACCOUNT_CONFI
+         automation,
+         intervals: { ...(base.intervals || DEFAULT_ACCOUNT_CONFIG.intervals) },
+         friendQuietHours: { ...DEFAULT_ACCOUNT_CONFIG.friendQuietHours, ...(base.friendQuietHours || {}) },
++        capitalMode: { ...DEFAULT_ACCOUNT_CONFIG.capitalMode, ...(base.capitalMode || {}) },
+         knownFriendGids,
+         knownFriendGidSyncCooldownSec,
+         friendsListCacheTtlSec,
+@@ -398,6 +404,17 @@ function normalizeAccountConfig(input: unknown, fallback: AccountConfig = accoun
+         };
+     }
+ 
++    if (src.capitalMode && typeof src.capitalMode === 'object') {
++        const old: Partial<CapitalModeConfig> = cfg.capitalMode || {};
++        const dogId = Math.max(0, Number(src.capitalMode.dogId ?? old.dogId) || 0);
++        const leadSeconds = Math.max(5, Math.min(300, Number(src.capitalMode.leadSeconds ?? old.leadSeconds) || 10));
++        cfg.capitalMode = {
++            enabled: src.capitalMode.enabled !== undefined ? !!src.capitalMode.enabled : !!old.enabled,
++            dogId,
++            leadSeconds,
++        };
++    }
++
+     if (Array.isArray(src.friendBlacklist)) {
+         cfg.friendBlacklist = src.friendBlacklist.map(Number).filter((n: number) => Number.isFinite(n) && n > 0);
+     }
+diff --git a/core/src/runtime/data-provider.ts b/core/src/runtime/data-provider.ts
+index 02008af..7e55ab7 100644
+--- a/core/src/runtime/data-provider.ts
++++ b/core/src/runtime/data-provider.ts
+@@ -166,6 +166,15 @@ function createDataProvider(options: DataProviderOptions) {
+         withdrawDog: (accountRef: string) => (
+             callWorkerApi(resolveAccountRefId(accountRef), 'withdrawDog')
+         ),
++        getCapitalMode: (accountRef: string) => (
++            callWorkerApi(resolveAccountRefId(accountRef), 'getCapitalMode')
++        ),
++        setCapitalMode: (accountRef: string, config: unknown) => (
++            callWorkerApi(resolveAccountRefId(accountRef), 'setCapitalMode', config)
++        ),
++        removePlants: (accountRef: string, landIds: unknown) => (
++            callWorkerApi(resolveAccountRefId(accountRef), 'removePlants', landIds)
++        ),
+         useDogFood: (accountRef: string, itemId: unknown, count: unknown = 1, uid: unknown = 0) => (
+             callWorkerApi(resolveAccountRefId(accountRef), 'useDogFood', itemId, count, uid)
+         ),
+diff --git a/core/src/services/capital-mode.ts b/core/src/services/capital-mode.ts
+new file mode 100644
+index 0000000..b895ded
+--- /dev/null
++++ b/core/src/services/capital-mode.ts
+@@ -0,0 +1,116 @@
++export {};
++/**
++ * 宠物资本模式（参照 BuildAtDawn 版）：
++ * 作物临近成熟时自动派出守护犬吃成熟期保护加成，收获完成后自动召回。
++ * 手动派出/收回宠物会立即释放自动模式的占用，避免互相抢狗。
++ */
++
++const { PlantPhase } = require('../config/config');
++const { getCapitalMode } = require('../models/store');
++const { getServerTimeSec, toNum, toTimeSec, log } = require('../utils/utils');
++const { createScheduler } = require('./scheduler');
++const { deployDog, getPetInfo, withdrawDog } = require('./pets');
++
++const scheduler = createScheduler('capital-mode');
++const state: { phase: 'idle' | 'deploying' | 'deployed' | 'withdrawing'; autoDogId: number; lastAttemptAt: number } = {
++    phase: 'idle',
++    autoDogId: 0,
++    lastAttemptAt: 0,
++};
++
++function findNearestMatureSeconds(lands: any[], analysis: any): number | null {
++    if (analysis && Array.isArray(analysis.harvestable) && analysis.harvestable.length) return 0;
++    const now = getServerTimeSec();
++    let nearest = Infinity;
++    for (const land of Array.isArray(lands) ? lands : []) {
++        const phases = Array.isArray(land && land.plant && land.plant.phases) ? land.plant.phases : [];
++        const mature = phases.find((phase: any) => toNum(phase && phase.phase) === PlantPhase.MATURE);
++        const at = toTimeSec(mature && mature.begin_time);
++        if (at > now) nearest = Math.min(nearest, at - now);
++    }
++    return Number.isFinite(nearest) ? nearest : null;
++}
++
++function clearOwnership() {
++    scheduler.clear('withdraw_after_harvest');
++    scheduler.clear('withdraw_safety');
++    state.phase = 'idle';
++    state.autoDogId = 0;
++}
++
++function releaseForManualCommand() {
++    clearOwnership();
++}
++
++async function prepareForFarmOperation({ lands, analysis, opType }: { lands: any[]; analysis: any; opType: string }): Promise<boolean> {
++    if (opType !== 'all' && opType !== 'harvest') return false;
++    const config = getCapitalMode();
++    if (!config.enabled || !config.dogId || state.phase !== 'idle') return false;
++    const matureIn = findNearestMatureSeconds(lands, analysis);
++    if (matureIn === null || matureIn > config.leadSeconds || Date.now() - state.lastAttemptAt < 5000) return false;
++    state.lastAttemptAt = Date.now();
++    state.phase = 'deploying';
++    try {
++        const overview = await getPetInfo();
++        if (overview.activeDogId) {
++            state.phase = 'idle';
++            return false;
++        }
++        const dog = (overview.dogs || []).find((item: any) => item.id === config.dogId && item.owned);
++        if (!dog) {
++            state.phase = 'idle';
++            return false;
++        }
++        await deployDog(config.dogId);
++        state.autoDogId = config.dogId;
++        state.phase = 'deployed';
++        scheduler.setTimeoutTask('withdraw_safety', 120000, async () => {
++            if (!state.autoDogId || state.phase !== 'deployed') return;
++            const dogId = state.autoDogId;
++            state.phase = 'withdrawing';
++            try {
++                const latest = await getPetInfo();
++                if (latest.activeDogId === dogId) await withdrawDog();
++            } catch (error: any) {
++                log('宠物', `资本模式安全召回失败: ${error.message}`, { module: 'pet', event: '资本模式召回', result: 'error', dogId });
++            } finally {
++                clearOwnership();
++            }
++        });
++        log('宠物', `资本模式已派出${dog.name}`, { module: 'pet', event: '资本模式派出', result: 'ok', matureIn });
++        return true;
++    } catch (error: any) {
++        clearOwnership();
++        log('宠物', `资本模式派出失败: ${error.message}`, { module: 'pet', event: '资本模式派出', result: 'error' });
++        return false;
++    }
++}
++
++function handleFarmHarvested() {
++    if (!state.autoDogId || state.phase !== 'deployed') return;
++    scheduler.setTimeoutTask('withdraw_after_harvest', 5000, async () => {
++        const dogId = state.autoDogId;
++        state.phase = 'withdrawing';
++        try {
++            const overview = await getPetInfo();
++            if (overview.activeDogId === dogId) await withdrawDog();
++            log('宠物', '资本模式已在收获后召回宠物', { module: 'pet', event: '资本模式召回', result: 'ok', dogId });
++        } catch (error: any) {
++            log('宠物', `资本模式召回失败: ${error.message}`, { module: 'pet', event: '资本模式召回', result: 'error', dogId });
++        } finally {
++            clearOwnership();
++        }
++    });
++}
++
++async function reconcileConfigChange(previous: any, next: any): Promise<void> {
++    if (!state.autoDogId || (next && next.enabled === true && Number(next.dogId) === state.autoDogId)) return;
++    try {
++        const overview = await getPetInfo();
++        if (overview.activeDogId === state.autoDogId) await withdrawDog();
++    } finally {
++        clearOwnership();
++    }
++}
++
++module.exports = { findNearestMatureSeconds, prepareForFarmOperation, handleFarmHarvested, reconcileConfigChange, releaseForManualCommand, _state: state };
+diff --git a/core/src/services/farm/scheduler.ts b/core/src/services/farm/scheduler.ts
+index d791610..22612fc 100644
+--- a/core/src/services/farm/scheduler.ts
++++ b/core/src/services/farm/scheduler.ts
+@@ -164,6 +164,12 @@ async function runFarmOperation(
+ 
+     const state = getUserState();
+     const status = analyzeLands(lands, isFirstFarmCheck, state.gid);
++    // 宠物资本模式：临近成熟时先派出守护犬，再继续收获流程。
++    try {
++        await require('../capital-mode').prepareForFarmOperation({ lands, analysis: status, opType });
++    } catch (e: any) {
++        logWarn('宠物', `资本模式预备失败: ${e.message}`);
++    }
+     const socialEventItemIds: number[] = getCleanableFarmSocialEventItemIds(landsReply);
+     const hasTargetLandId = targetLandIdInput !== null
+         && targetLandIdInput !== undefined
+@@ -263,6 +269,7 @@ async function runFarmOperation(
+                     landIds: [...harvestable],
+                     opType,
+                 });
++                require('../capital-mode').handleFarmHarvested();
+             } catch (e: any) {
+                 logWarn('收获', e.message, {
+                     module: 'farm',
+diff --git a/core/src/types/config.ts b/core/src/types/config.ts
+index 0528710..19ab88b 100644
+--- a/core/src/types/config.ts
++++ b/core/src/types/config.ts
+@@ -90,12 +90,22 @@ export interface QuietHoursConfig {
+   continueFarm: boolean;
+ }
+ 
++/** 宠物资本模式：收获前提前派出守护犬，收获后自动召回（参照 BuildAtDawn 版）。 */
++export interface CapitalModeConfig {
++  enabled: boolean;
++  /** 派出的宠物 ID，0 表示未选择。 */
++  dogId: number;
++  /** 距最近作物成熟多少秒内开始尝试派出（5-300）。 */
++  leadSeconds: number;
++}
++
+ export interface AccountConfig {
+   automation: AutomationConfig;
+   plantingStrategy: PlantingStrategy;
+   preferredSeedId: number;
+   intervals: IntervalConfig;
+   friendQuietHours: QuietHoursConfig;
++  capitalMode: CapitalModeConfig;
+   knownFriendGids: number[];
+   knownFriendGidSyncCooldownSec: number;
+   friendsListCacheTtlSec: number;
+diff --git a/web/src/components/FarmPanel.vue b/web/src/components/FarmPanel.vue
+index a4c2f18..c3a3730 100644
+--- a/web/src/components/FarmPanel.vue
++++ b/web/src/components/FarmPanel.vue
+@@ -109,6 +109,54 @@ function changeRefreshSeconds(event: Event) {
+   const input = event.target as HTMLInputElement
+   autoRefreshSeconds.value = normalizeRefreshSeconds(input.value)
+   input.value = String(autoRefreshSeconds.value)
++  // 直接输入间隔即视为想启用定时刷新
++  if (!autoRefreshEnabled.value)
++    autoRefreshEnabled.value = true
++}
++
++// 场景视图气泡操作：催熟=对该地施有机肥；铲除走 removePlant。
++async function ripenSceneLand(land: any) {
++  const accountId = currentAccountId.value
++  const landId = Number(land?.id) || 0
++  if (!accountId || !landId || fertilizePending.value)
++    return
++  const result = await farmStore.fertilizeAll(accountId, 'organic', [landId])
++  if (!result) {
++    toast.error(fertilizeError.value || '催熟失败，请刷新土地确认最新状态')
++    return
++  }
++  if (!result.successCount)
++    toast.info('该作物当前不可催熟')
++  else toast.success(`已为 #${landId} 催熟`)
++}
++
++async function removeSceneLand(land: any) {
++  const accountId = currentAccountId.value
++  const landId = Number(land?.id) || 0
++  if (!accountId || !landId || operating.value)
++    return
++  const plantName = String(land?.plantName || '').trim()
++  confirmConfig.value = {
++    title: '确认铲除',
++    message: `确定要铲除 #${landId} ${plantName || '该作物'} 吗？此操作不可恢复。`,
++    opType: 'removeScene',
++    landId,
++  }
++  confirmVisible.value = true
++}
++
++async function executeSceneRemove(landId: number) {
++  operating.value = true
++  try {
++    await farmStore.removePlants(currentAccountId.value, [landId])
++    toast.success(`已铲除 #${landId}`)
++  }
++  catch (e: any) {
++    toast.error(e?.message || '铲除失败')
++  }
++  finally {
++    operating.value = false
++  }
+ }
+ 
+ const currentAccountConnected = computed(() => {
+@@ -138,6 +186,7 @@ const confirmConfig = ref({
+   title: '',
+   message: '',
+   opType: '',
++  landId: 0,
+ })
+ 
+ const selectedInteractionItemId = ref<string>()
+@@ -212,10 +261,17 @@ function isLandFarmingCandidate(land: any) {
+ async function executeOperate() {
+   if (!currentAccountId.value || !confirmConfig.value.opType)
+     return
++  const opType = confirmConfig.value.opType
++  const sceneLandId = Number(confirmConfig.value.landId) || 0
+   confirmVisible.value = false
++  if (opType === 'removeScene') {
++    if (sceneLandId > 0)
++      await executeSceneRemove(sceneLandId)
++    return
++  }
+   operating.value = true
+   try {
+-    await farmStore.operate(currentAccountId.value, confirmConfig.value.opType)
++    await farmStore.operate(currentAccountId.value, opType)
+   }
+   finally {
+     operating.value = false
+@@ -238,6 +294,7 @@ function handleOperate(opType: string) {
+     title: '确认操作',
+     message: confirmMap[opType] || '确定执行此操作吗？',
+     opType,
++    landId: 0,
+   }
+   confirmVisible.value = true
+ }
+@@ -901,7 +958,8 @@ onUnmounted(() => {
+               v-if="landView === 'scene' && !selecting"
+               :lands="lands"
+               class="farm-scene-block"
+-              @select="detailLandId = Number($event?.id) || null"
++              @fertilize="ripenSceneLand"
++              @remove="removeSceneLand"
+             />
+             <div v-else ref="gridEl" class="farm-grid" :class="{ 'is-selecting': selecting, 'is-compact': landView === 'compact' && !selecting }" :style="{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }">
+               <LandCard
+diff --git a/web/src/components/PetPanel.vue b/web/src/components/PetPanel.vue
+index 74a9d60..29978aa 100644
+--- a/web/src/components/PetPanel.vue
++++ b/web/src/components/PetPanel.vue
+@@ -37,8 +37,47 @@ const {
+   claimingGifts,
+   giftError,
+   error,
++  capitalMode,
++  capitalModeLoading,
++  capitalModeSaving,
++  capitalModeError,
+ } = storeToRefs(petStore)
+ 
++// ---- 资本模式：收获前自动派守护犬，收获后自动召回 ----
++const capitalDraft = reactive({ enabled: false, dogId: 0, leadSeconds: 10 })
++const capitalDraftDirty = ref(false)
++const ownedDogs = computed(() => dogs.value.filter(dog => dog.owned))
++
++watch(capitalMode, (value) => {
++  if (capitalDraftDirty.value)
++    return
++  capitalDraft.enabled = !!value.enabled
++  capitalDraft.dogId = Math.max(0, Number(value.dogId) || 0)
++  capitalDraft.leadSeconds = Math.max(5, Math.min(300, Number(value.leadSeconds) || 10))
++}, { immediate: true })
++
++function markCapitalDirty() {
++  capitalDraftDirty.value = true
++}
++
++async function handleSaveCapitalMode() {
++  const id = String(currentAccountId.value || '')
++  if (!id || capitalModeSaving.value)
++    return
++  const result = await petStore.saveCapitalMode(id, {
++    enabled: capitalDraft.enabled,
++    dogId: capitalDraft.dogId,
++    leadSeconds: capitalDraft.leadSeconds,
++  })
++  if (result) {
++    capitalDraftDirty.value = false
++    toastStore.success(result.enabled ? '资本模式已开启' : '资本模式已关闭')
++  }
++  else {
++    toastStore.error(petStore.capitalModeError || '保存资本模式失败')
++  }
++}
++
+ const useCounts = reactive<Record<number, number>>({})
+ const tokenRef = useStorage('admin_token', '')
+ const showProtectLogs = ref(false)
+@@ -159,8 +198,10 @@ async function loadPetInfo() {
+     return
+   if (!realtimeConnected.value)
+     await statusStore.fetchStatus(id)
+-  if (account.running && isConnected.value)
++  if (account.running && isConnected.value) {
+     await petStore.fetchPetInfo(id)
++    await petStore.fetchCapitalMode(id)
++  }
+ }
+ 
+ async function refreshPetInfo() {
+@@ -323,6 +364,47 @@ watch(currentAccountId, () => {
+         </div>
+       </section>
+ 
++      <section class="personal-panel__card pet-section pet-capital">
++        <div class="pet-capital__head">
++          <h3><span class="i-carbon-timer" /> 资本模式</h3>
++          <p>作物临近成熟时自动派出守护犬吃保护加成，收获后自动召回；手动上场/收回宠物会临时接管。</p>
++        </div>
++        <div class="pet-capital__body">
++          <label class="pet-capital__toggle">
++            <input v-model="capitalDraft.enabled" type="checkbox" @change="markCapitalDirty">
++            <span>启用资本模式</span>
++          </label>
++          <template v-if="capitalDraft.enabled">
++            <label class="pet-capital__row">
++              <span>守护宠物</span>
++              <select v-model.number="capitalDraft.dogId" :disabled="capitalModeLoading || capitalModeSaving" @change="markCapitalDirty">
++                <option :value="0">
++                  未选择
++                </option>
++                <option v-for="dog in ownedDogs" :key="dog.id" :value="dog.id">
++                  {{ dog.name }}
++                </option>
++              </select>
++            </label>
++            <label class="pet-capital__row">
++              <span>提前派出（秒）</span>
++              <input
++                v-model.number="capitalDraft.leadSeconds"
++                type="number" min="5" max="300" step="1"
++                :disabled="capitalModeLoading || capitalModeSaving"
++                @change="markCapitalDirty"
++              >
++            </label>
++          </template>
++          <div class="pet-capital__footer">
++            <span v-if="capitalModeError" class="pet-capital__error">{{ capitalModeError }}</span>
++            <NButton size="small" type="primary" :loading="capitalModeSaving" :disabled="!isConnected || !capitalDraftDirty" @click="handleSaveCapitalMode">
++              保存
++            </NButton>
++          </div>
++        </div>
++      </section>
++
+       <section class="personal-panel__card pet-section">
+         <div class="pet-section__heading panel-sticky panel-sticky--inset shrink-0" style="--panel-pad: 18px">
+           <NTabs v-model:value="currentPetTab" class="min-w-0 flex-1" type="line" animated>
+@@ -1045,4 +1127,97 @@ watch(currentAccountId, () => {
+     display: none;
+   }
+ }
++
++/* 资本模式卡片 */
++.pet-capital__head {
++  display: grid;
++  gap: 4px;
++  padding: 14px 18px;
++  border-bottom: 1px solid var(--ui-border);
++}
++
++.pet-capital__head h3 {
++  display: inline-flex;
++  align-items: center;
++  gap: 6px;
++  font-size: 15px;
++  font-weight: var(--fw-700);
++}
++
++.pet-capital__head p {
++  margin: 0;
++  color: var(--ui-muted);
++  font-size: 12px;
++  line-height: 1.6;
++}
++
++.pet-capital__body {
++  display: grid;
++  gap: 10px;
++  padding: 14px 18px 16px;
++}
++
++.pet-capital__toggle {
++  display: inline-flex;
++  align-items: center;
++  gap: 8px;
++  color: var(--ui-ink);
++  font-size: 13px;
++  cursor: pointer;
++}
++
++.pet-capital__toggle input {
++  width: 15px;
++  height: 15px;
++  accent-color: var(--ui-primary);
++  cursor: pointer;
++}
++
++.pet-capital__row {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  color: var(--ui-muted);
++  font-size: 13px;
++}
++
++.pet-capital__row select,
++.pet-capital__row input[type='number'] {
++  min-width: 0;
++  padding: 5px 8px;
++  border: 1px solid var(--ui-border);
++  border-radius: 8px;
++  color: var(--ui-ink);
++  background: var(--ui-surface-strong);
++  font: inherit;
++}
++
++.pet-capital__row select {
++  max-width: 220px;
++}
++
++.pet-capital__row input[type='number'] {
++  width: 90px;
++  text-align: center;
++}
++
++.pet-capital__row select:disabled,
++.pet-capital__row input:disabled {
++  color: var(--ui-subtle);
++  cursor: not-allowed;
++}
++
++.pet-capital__footer {
++  display: flex;
++  align-items: center;
++  justify-content: flex-end;
++  gap: 10px;
++}
++
++.pet-capital__error {
++  min-width: 0;
++  color: var(--ui-warning, #d97706);
++  font-size: 12px;
++}
+ </style>
+diff --git a/web/src/stores/farm.ts b/web/src/stores/farm.ts
+index ffe9530..03ffbf8 100644
+--- a/web/src/stores/farm.ts
++++ b/web/src/stores/farm.ts
+@@ -390,6 +390,22 @@ export const useFarmStore = defineStore('farm', () => {
+     }
+   }
+ 
++  /** 铲除指定地块作物（PlantService.RemovePlant），成功后从本地列表移除。 */
++  async function removePlants(accountId: string, landIds: number[]) {
++    const ids = [...new Set((landIds || []).map(id => Number(id)).filter(id => Number.isSafeInteger(id) && id > 0))]
++    if (!accountId || !ids.length)
++      return false
++    const res = await api.post('/api/farm/remove-plants', { landIds: ids }, {
++      headers: { 'x-account-id': accountId },
++      skipErrorToast: true,
++    } as any)
++    if (!res.data?.ok)
++      throw new Error(getApiErrorMessage(res.data, '铲除失败'))
++    const removed = new Set(ids)
++    lands.value = (lands.value || []).filter(land => !removed.has(Number(land.id)))
++    return true
++  }
++
+   async function operate(accountId: string, opType: string, landId: number | null = null) {
+     if (!accountId)
+       return false
+@@ -433,5 +449,6 @@ export const useFarmStore = defineStore('farm', () => {
+     resetInteractionState,
+     fertilizeLand,
+     fertilizeAll,
++    removePlants,
+   }
+ })
+diff --git a/web/src/stores/pet.ts b/web/src/stores/pet.ts
+index c1d599e..8339e6b 100644
+--- a/web/src/stores/pet.ts
++++ b/web/src/stores/pet.ts
+@@ -68,6 +68,15 @@ export interface PetProtectLog {
+   dogName: string
+ }
+ 
++/** 宠物资本模式：收获前自动派守护犬，收获后自动召回。 */
++export interface CapitalModeConfig {
++  enabled: boolean
++  dogId: number
++  leadSeconds: number
++}
++
++export const DEFAULT_CAPITAL_MODE: CapitalModeConfig = { enabled: false, dogId: 0, leadSeconds: 10 }
++
+ export const usePetStore = defineStore('pet', () => {
+   const snapshot = ref<PetSnapshot | null>(null)
+   const loading = ref(false)
+@@ -80,6 +89,10 @@ export const usePetStore = defineStore('pet', () => {
+   const giftError = ref('')
+   const error = ref('')
+   const accountId = ref('')
++  const capitalMode = ref<CapitalModeConfig>({ ...DEFAULT_CAPITAL_MODE })
++  const capitalModeLoading = ref(false)
++  const capitalModeSaving = ref(false)
++  const capitalModeError = ref('')
+   let requestSequence = 0
+   let giftRequestSequence = 0
+ 
+@@ -101,6 +114,8 @@ export const usePetStore = defineStore('pet', () => {
+     giftError.value = ''
+     error.value = ''
+     accountId.value = ''
++    capitalMode.value = { ...DEFAULT_CAPITAL_MODE }
++    capitalModeError.value = ''
+   }
+ 
+   async function fetchProtectLogs(requestedAccountId: string) {
+@@ -314,6 +329,69 @@ export const usePetStore = defineStore('pet', () => {
+     }
+   }
+ 
++  async function fetchCapitalMode(requestedAccountId: string): Promise<boolean> {
++    const id = String(requestedAccountId || '').trim()
++    if (!id || capitalModeLoading.value)
++      return false
++    capitalModeLoading.value = true
++    capitalModeError.value = ''
++    try {
++      const res = await api.get('/api/pets/capital-mode', {
++        headers: { 'x-account-id': id },
++        skipErrorToast: true,
++      } as any)
++      if (!res.data?.ok) {
++        capitalModeError.value = getApiErrorMessage(res.data, '读取资本模式配置失败')
++        return false
++      }
++      const data = res.data.data || {}
++      if (accountId.value === id || !accountId.value)
++        capitalMode.value = {
++          enabled: data.enabled === true,
++          dogId: Math.max(0, Number(data.dogId) || 0),
++          leadSeconds: Math.max(5, Math.min(300, Number(data.leadSeconds) || 10)),
++        }
++      return true
++    }
++    catch (cause: any) {
++      capitalModeError.value = getApiErrorMessage(cause, '读取资本模式配置失败')
++      return false
++    }
++    finally {
++      capitalModeLoading.value = false
++    }
++  }
++
++  async function saveCapitalMode(requestedAccountId: string, config: CapitalModeConfig): Promise<CapitalModeConfig | null> {
++    const id = String(requestedAccountId || '').trim()
++    if (!id || capitalModeSaving.value)
++      return null
++    capitalModeSaving.value = true
++    capitalModeError.value = ''
++    try {
++      const res = await api.post('/api/pets/capital-mode', {
++        enabled: config.enabled === true,
++        dogId: Math.max(0, Number(config.dogId) || 0),
++        leadSeconds: Math.max(5, Math.min(300, Number(config.leadSeconds) || 10)),
++      }, { headers: { 'x-account-id': id }, skipErrorToast: true } as any)
++      if (!res.data?.ok) {
++        capitalModeError.value = getApiErrorMessage(res.data, '保存资本模式配置失败')
++        return null
++      }
++      const saved = res.data.data?.capitalMode
++      if (saved && accountId.value === id)
++        capitalMode.value = { ...saved }
++      return capitalMode.value
++    }
++    catch (cause: any) {
++      capitalModeError.value = getApiErrorMessage(cause, '保存资本模式配置失败')
++      return null
++    }
++    finally {
++      capitalModeSaving.value = false
++    }
++  }
++
+   return {
+     snapshot,
+     dogs,
+@@ -329,8 +407,14 @@ export const usePetStore = defineStore('pet', () => {
+     giftError,
+     error,
+     accountId,
++    capitalMode,
++    capitalModeLoading,
++    capitalModeSaving,
++    capitalModeError,
+     fetchPetInfo,
+     fetchProtectLogs,
++    fetchCapitalMode,
++    saveCapitalMode,
+     claimDogSkillGifts,
+     useDogFood,
+     activateDog,
+diff --git a/web/src/utils/number-format.ts b/web/src/utils/number-format.ts
+new file mode 100644
+index 0000000..52044ba
+--- /dev/null
++++ b/web/src/utils/number-format.ts
+@@ -0,0 +1,28 @@
++// 数值展示：超过 1 万显示“万”，超过 1 亿显示“亿”（参照 BuildAtDawn 版 number-format.ts）。
++const WAN_UNIT = '万'
++const YI_UNIT = '亿'
++const WAN_THRESHOLD = 10000
++const YI_THRESHOLD = 100000000
++
++function toFiniteNumber(value: unknown) {
++  const amount = Number(value ?? 0)
++  return Number.isFinite(amount) ? amount : 0
++}
++
++export function formatCompactAmount(value: unknown) {
++  const amount = toFiniteNumber(value)
++  const absAmount = Math.abs(amount)
++  if (absAmount >= YI_THRESHOLD)
++    return `${(amount / YI_THRESHOLD).toFixed(2)}${YI_UNIT}`
++  if (absAmount >= WAN_THRESHOLD)
++    return `${(amount / WAN_THRESHOLD).toFixed(2)}${WAN_UNIT}`
++  return amount.toLocaleString('zh-CN')
++}
++
++export function formatGoldAmount(value: unknown) {
++  return formatCompactAmount(value)
++}
++
++export function formatGoldBeanAmount(value: unknown) {
++  return formatCompactAmount(value)
++}
+diff --git a/web/src/views/Dashboard.vue b/web/src/views/Dashboard.vue
+index 003888b..90f6c8c 100644
+--- a/web/src/views/Dashboard.vue
++++ b/web/src/views/Dashboard.vue
+@@ -8,6 +8,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
+ import BaseInput from '@/components/ui/BaseInput.vue'
+ import BaseSelect from '@/components/ui/BaseSelect.vue'
+ import EmptyState from '@/components/ui/EmptyState.vue'
++import { formatCompactAmount } from '@/utils/number-format'
+ import { getPlatformLabel, useAccountStore } from '@/stores/account'
+ import { useBagStore } from '@/stores/bag'
+ import { useStatusStore } from '@/stores/status'
+@@ -343,8 +344,7 @@ function getExpPercent(p: any) {
+ }
+ 
+ function formatAssetAmount(value: unknown) {
+-  const amount = Number(value)
+-  return Number.isFinite(amount) ? Math.max(0, Math.trunc(amount)).toLocaleString('zh-CN') : '0'
++  return formatCompactAmount(value)
+ }
+ 
+ async function refreshBag(force = false) {
+-- 
+2.56.0
+

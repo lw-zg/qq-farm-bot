@@ -1,0 +1,3152 @@
+From 72ec53db487a488ad33906d195197f66d99987be Mon Sep 17 00:00:00 2001
+From: lw-zg <lw-zg@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 15:53:06 +0800
+Subject: [PATCH 8/9] feat(web): add farm display options
+ (standard/compact/scene view + auto refresh) from BuildAtDawn
+
+---
+ web/src/components/FarmLandCard.vue           |   31 +
+ web/src/components/FarmPanel.vue              |  206 ++-
+ web/src/components/FarmScene.vue              |  429 +++++
+ web/src/components/OfficialBichonMutation.vue |   28 +
+ .../components/OfficialCrystalMutation.vue    |   40 +
+ web/src/components/SceneLandCard.vue          | 1522 +++++++++++++++++
+ web/src/styles/official-crystal-animation.css |  748 ++++++++
+ 7 files changed, 2998 insertions(+), 6 deletions(-)
+ create mode 100644 web/src/components/FarmScene.vue
+ create mode 100644 web/src/components/OfficialBichonMutation.vue
+ create mode 100644 web/src/components/OfficialCrystalMutation.vue
+ create mode 100644 web/src/components/SceneLandCard.vue
+ create mode 100644 web/src/styles/official-crystal-animation.css
+
+diff --git a/web/src/components/FarmLandCard.vue b/web/src/components/FarmLandCard.vue
+index de96027..fbaed01 100644
+--- a/web/src/components/FarmLandCard.vue
++++ b/web/src/components/FarmLandCard.vue
+@@ -13,12 +13,15 @@ const props = withDefaults(defineProps<{
+   selectionLabel?: string
+   /** 非选择模式下点击卡片触发 open（查看土地详情）。 */
+   openable?: boolean
++  /** 紧凑视图：缩小卡片并隐藏进度条与状态图标行，方便一屏看更多土地。 */
++  compact?: boolean
+ }>(), {
+   selectable: false,
+   selected: false,
+   selectionDisabled: false,
+   selectionLabel: '',
+   openable: false,
++  compact: false,
+ })
+ 
+ const emit = defineEmits<{
+@@ -218,6 +221,7 @@ const ariaLabel = computed(() => {
+         'plot--selectable': selectable,
+         'plot--selected': selectable && selected,
+         'plot--disabled': selectable && selectionDisabled,
++        'plot--compact': compact,
+       },
+     ]"
+     :role="interactive ? (selectable ? 'checkbox' : 'button') : undefined"
+@@ -687,4 +691,31 @@ const ariaLabel = computed(() => {
+ .dark .plot--lv6 {
+   --soil-tint: #82bddf;
+ }
++
++/* 紧凑视图：缩小卡片、隐藏进度条与状态图标行，一屏容纳更多土地 */
++.plot--compact {
++  padding: 5px 6px 6px;
++  border-radius: 10px;
++}
++.plot--compact .plot__top {
++  min-height: 0;
++}
++.plot--compact .plot__crop {
++  width: 34px;
++  height: 34px;
++}
++.plot--compact .plot__name {
++  margin-top: 2px;
++  font-size: 11px;
++  line-height: 14px;
++}
++.plot--compact .plot__time {
++  height: 16px;
++  margin-top: 0;
++  font-size: 11px;
++}
++.plot--compact .plot__bar,
++.plot--compact .plot__tags {
++  display: none;
++}
+ </style>
+diff --git a/web/src/components/FarmPanel.vue b/web/src/components/FarmPanel.vue
+index 7c80f96..a4c2f18 100644
+--- a/web/src/components/FarmPanel.vue
++++ b/web/src/components/FarmPanel.vue
+@@ -9,6 +9,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+ import { useRoute } from 'vue-router'
+ import CareerHarvestSteal from '@/components/CareerHarvestSteal.vue'
+ import ConfirmModal from '@/components/ConfirmModal.vue'
++import FarmScene from '@/components/FarmScene.vue'
+ import LandCard from '@/components/FarmLandCard.vue'
+ import LandDetailModal from '@/components/LandDetailModal.vue'
+ import BaseSelect from '@/components/ui/BaseSelect.vue'
+@@ -51,6 +52,65 @@ watch(currentAccountId, () => {
+   detailLandId.value = null
+ })
+ 
++// ---- 显示选项：土地布局（标准/紧凑/场景）与定时刷新，按账号存 localStorage（参照 BuildAtDawn 版） ----
++type LandView = 'default' | 'compact' | 'scene'
++const landView = ref<LandView>('default')
++const autoRefreshEnabled = ref(false)
++const autoRefreshSeconds = ref(3)
++
++function farmPreferenceKey(accountId: string) {
++  return `qq-farm-bot:farm-prefs:${accountId}`
++}
++function normalizeRefreshSeconds(value: unknown) {
++  const seconds = Math.floor(Number(value))
++  return Number.isSafeInteger(seconds) && seconds >= 1 && seconds <= 3600 ? seconds : 3
++}
++let preferencesLoaded = false
++function loadFarmPreferences(accountId: string) {
++  preferencesLoaded = false
++  landView.value = 'default'
++  autoRefreshEnabled.value = false
++  autoRefreshSeconds.value = 3
++  try {
++    const saved = JSON.parse(localStorage.getItem(farmPreferenceKey(accountId)) || '{}')
++    autoRefreshEnabled.value = saved.autoRefresh === true
++    autoRefreshSeconds.value = normalizeRefreshSeconds(saved.autoRefreshSeconds ?? 3)
++    landView.value = saved.landView === 'compact' || saved.landView === 'scene' ? saved.landView : 'default'
++  }
++  catch {
++    // 偏好读取失败时保持默认显示，不影响农场浏览。
++  }
++  preferencesLoaded = true
++}
++function saveFarmPreferences() {
++  const accountId = String(currentAccountId.value || '')
++  if (!preferencesLoaded || !accountId)
++    return
++  try {
++    localStorage.setItem(farmPreferenceKey(accountId), JSON.stringify({
++      autoRefresh: autoRefreshEnabled.value,
++      autoRefreshSeconds: autoRefreshSeconds.value,
++      landView: landView.value,
++    }))
++  }
++  catch {
++    // 偏好写入失败不能妨碍查看农场。
++  }
++}
++watch(currentAccountId, (accountId) => {
++  if (accountId)
++    loadFarmPreferences(String(accountId))
++}, { immediate: true })
++watch([landView, autoRefreshEnabled, autoRefreshSeconds], () => {
++  saveFarmPreferences()
++})
++
++function changeRefreshSeconds(event: Event) {
++  const input = event.target as HTMLInputElement
++  autoRefreshSeconds.value = normalizeRefreshSeconds(input.value)
++  input.value = String(autoRefreshSeconds.value)
++}
++
+ const currentAccountConnected = computed(() => {
+   const accountId = String(currentAccountId.value || '')
+   return !!accountId
+@@ -364,17 +424,19 @@ useResizeObserver(gridEl, ([entry]) => {
+   })
+ })
+ const GRID_GAP = 12
+-const CARD_MIN = 128
+-const CARD_MAX = 230
++// 紧凑视图用更小的卡片尺寸区间，同一宽度能排更多列；批量选择时回到标准尺寸保证可读性。
++const compactGrid = computed(() => landView.value === 'compact' && !selecting.value)
++const cardMin = computed(() => (compactGrid.value ? 92 : 128))
++const cardMax = computed(() => (compactGrid.value ? 150 : 230))
+ const gridColumns = computed(() => {
+   const width = gridWidth.value
+   const count = (lands.value || []).length
+   if (!width || !count)
+     return 2
+   const fits = (cols: number) => (width - GRID_GAP * (cols - 1)) / cols
+-  const maxCols = Math.max(1, Math.floor((width + GRID_GAP) / (CARD_MIN + GRID_GAP)))
++  const maxCols = Math.max(1, Math.floor((width + GRID_GAP) / (cardMin.value + GRID_GAP)))
+   for (let cols = Math.min(maxCols, count); cols >= 2; cols--) {
+-    if (count % cols === 0 && fits(cols) <= CARD_MAX)
++    if (count % cols === 0 && fits(cols) <= cardMax.value)
+       return cols
+   }
+   return maxCols
+@@ -597,7 +659,8 @@ const { pause, resume } = useIntervalFn(() => {
+   }
+ }, 1000)
+ 
+-const { pause: pauseRefresh, resume: resumeRefresh } = useIntervalFn(refreshFarmData, 60000)
++const refreshIntervalMs = computed(() => (autoRefreshEnabled.value ? autoRefreshSeconds.value * 1000 : 60000))
++const { pause: pauseRefresh, resume: resumeRefresh } = useIntervalFn(refreshFarmData, refreshIntervalMs)
+ 
+ onMounted(() => {
+   resume()
+@@ -721,6 +784,37 @@ onUnmounted(() => {
+         </template>
+       </div>
+ 
++      <!-- 显示选项：土地布局（标准/紧凑/场景）+ 定时刷新，独立成行保证小屏可用 -->
++      <div class="farm-display-controls shrink-0 border-b border-gray-100 px-4 py-2 dark:border-gray-700 sm:px-5">
++        <div class="land-view-switch" role="group" aria-label="土地布局">
++          <button type="button" title="标准视图" aria-label="标准视图" :aria-pressed="landView === 'default'" :disabled="selecting" @click="landView = 'default'">
++            <span class="i-carbon-grid" /><span>标准</span>
++          </button>
++          <button type="button" title="紧凑视图" aria-label="紧凑视图" :aria-pressed="landView === 'compact'" :disabled="selecting" @click="landView = 'compact'">
++            <span class="i-carbon-zoom-out" /><span>紧凑</span>
++          </button>
++          <button type="button" title="场景视图" aria-label="场景视图" :aria-pressed="landView === 'scene'" :disabled="selecting" @click="landView = 'scene'">
++            <span class="i-carbon-image" /><span>场景</span>
++          </button>
++        </div>
++        <label class="farm-auto-refresh" title="定时自动刷新土地">
++          <input v-model="autoRefreshEnabled" type="checkbox" aria-label="定时刷新土地">
++          <span>定时</span>
++          <input
++            class="farm-auto-refresh__seconds"
++            type="number"
++            min="1"
++            max="3600"
++            step="1"
++            :value="autoRefreshSeconds"
++            :disabled="!autoRefreshEnabled"
++            aria-label="土地自动刷新间隔（秒）"
++            @change="changeRefreshSeconds"
++          >
++          <span>秒</span>
++        </label>
++      </div>
++
+       <!-- Grid -->
+       <div class="personal-panel__card p-4 sm:p-5">
+         <div v-if="loading || !currentAccountId || !currentAccountRunning || error || !loaded || !lands?.length" class="personal-panel__scroll custom-scrollbar" role="region" aria-label="土地状态" tabindex="0">
+@@ -803,12 +897,19 @@ onUnmounted(() => {
+                 好友放置了 {{ cleanableFarmSocialEventNames }}，可一键务农，或选择土地后务农清理。
+               </span>
+             </div>
+-            <div ref="gridEl" class="farm-grid" :class="{ 'is-selecting': selecting }" :style="{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }">
++            <FarmScene
++              v-if="landView === 'scene' && !selecting"
++              :lands="lands"
++              class="farm-scene-block"
++              @select="detailLandId = Number($event?.id) || null"
++            />
++            <div v-else ref="gridEl" class="farm-grid" :class="{ 'is-selecting': selecting, 'is-compact': landView === 'compact' && !selecting }" :style="{ gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))` }">
+               <LandCard
+                 v-for="land in lands"
+                 :key="land.id"
+                 :land="land"
+                 openable
++                :compact="landView === 'compact' && !selecting"
+                 :selectable="selecting"
+                 :selected="isLandSelected(land)"
+                 :selection-disabled="!canSelectLand(land)"
+@@ -1059,6 +1160,99 @@ onUnmounted(() => {
+   font-size: 13px;
+ }
+ 
++/* 显示选项：土地布局切换 + 定时刷新，位于状态胶囊与生涯之间 */
++.farm-display-controls {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 8px 14px;
++  min-width: 0;
++}
++
++.land-view-switch {
++  display: inline-grid;
++  grid-auto-flow: column;
++  grid-auto-columns: minmax(0, 1fr);
++  gap: 2px;
++  padding: 2px;
++  border: 1px solid var(--ui-border);
++  border-radius: 10px;
++  background: var(--ui-surface-soft);
++}
++
++.land-view-switch button {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 4px;
++  padding: 4px 10px;
++  border-radius: 8px;
++  color: var(--ui-muted);
++  font-size: 12px;
++  line-height: 16px;
++  white-space: nowrap;
++}
++
++.land-view-switch button[aria-pressed='true'] {
++  color: var(--ui-primary);
++  background: var(--ui-surface-strong);
++  box-shadow: 0 1px 4px rgba(32, 58, 43, 0.08);
++  font-weight: var(--fw-650);
++}
++
++.land-view-switch button:disabled {
++  color: var(--ui-subtle);
++  cursor: not-allowed;
++}
++
++.land-view-switch button:focus-visible,
++.farm-auto-refresh:focus-within {
++  outline: 2px solid var(--ui-primary);
++  outline-offset: 2px;
++}
++
++.farm-auto-refresh {
++  display: inline-flex;
++  align-items: center;
++  gap: 5px;
++  color: var(--ui-muted);
++  font-size: 12px;
++  white-space: nowrap;
++  cursor: pointer;
++}
++
++.farm-auto-refresh input[type='checkbox'] {
++  width: 14px;
++  height: 14px;
++  accent-color: var(--ui-primary);
++  cursor: pointer;
++}
++
++.farm-auto-refresh__seconds {
++  width: 52px;
++  padding: 2px 4px;
++  border: 1px solid var(--ui-border);
++  border-radius: 6px;
++  color: var(--ui-ink);
++  background: var(--ui-surface-strong);
++  font: inherit;
++  text-align: center;
++}
++
++.farm-auto-refresh__seconds:disabled {
++  color: var(--ui-subtle);
++  background: var(--ui-surface-soft);
++  cursor: not-allowed;
++}
++
++.farm-scene-block {
++  margin-top: 4px;
++}
++
++.farm-grid.is-compact {
++  gap: 8px;
++}
++
+ .farm-summary__states {
+   display: flex;
+   flex-wrap: wrap;
+diff --git a/web/src/components/FarmScene.vue b/web/src/components/FarmScene.vue
+new file mode 100644
+index 0000000..6482a85
+--- /dev/null
++++ b/web/src/components/FarmScene.vue
+@@ -0,0 +1,429 @@
++<script lang="ts">
++// All farm scenes reuse decoded textures. This matters when several friends are expanded.
++</script>
++
++<script setup lang="ts">
++import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
++import LandCard from '@/components/SceneLandCard.vue'
++
++const props = withDefaults(defineProps<{
++  lands: any[]
++  weather?: any
++}>(), {
++  weather: undefined,
++})
++
++const emit = defineEmits<{
++  (e: 'fertilize', land: any): void
++  (e: 'remove', land: any): void
++  (e: 'select', land: any): void
++}>()
++
++const farmSceneImageCache = new Map<string, HTMLImageElement>()
++
++const viewport = ref<HTMLElement | null>(null)
++const canvas = ref<HTMLCanvasElement | null>(null)
++const visible = ref(false)
++const selectedLandId = ref<number | null>(null)
++const width = 1200
++const height = 650
++const landWidth = 210
++const landHeight = 125
++const stepX = 115
++const stepY = 59
++const mergedWidth = landWidth + stepX * 2
++const mergedHeight = landHeight + stepY * 2
++let visibilityObserver: IntersectionObserver | null = null
++
++const displayLands = computed(() =>
++  (Array.isArray(props.lands) ? props.lands : []).filter(land => !land?.occupiedByMaster),
++)
++
++// Crop countdowns change every second, but they do not change the canvas ground layer.
++const canvasSignature = computed(() => displayLands.value.map(land => [
++  land?.id,
++  land?.level,
++  land?.needWater,
++  land?.status,
++  land?.plantSize,
++  Array.isArray(land?.occupiedLandIds) ? land.occupiedLandIds.join(',') : '',
++].join(':')).join('|'))
++
++function anchorId(land: any) {
++  const ids = Array.isArray(land?.occupiedLandIds)
++    ? land.occupiedLandIds.map(Number).filter((id: number) => id > 0)
++    : []
++  return ids.length > 1 ? Math.min(...ids) : Number(land?.id) || 0
++}
++
++function position(land: any) {
++  const occupied = Array.isArray(land?.occupiedLandIds)
++    ? land.occupiedLandIds.map(Number).filter((id: number) => id > 0)
++    : []
++  const ids = occupied.length > 1 ? occupied : [anchorId(land)]
++  const points = ids.map((id: number) => {
++    const column = (id - 1) % 4
++    const row = Math.floor((id - 1) / 4)
++    return { x: 700 + column * stepX - row * stepX, y: 86 + (column + row) * stepY }
++  })
++  return {
++    x: points.reduce((sum: number, point: { x: number }) => sum + point.x, 0) / points.length,
++    y: points.reduce((sum: number, point: { y: number }) => sum + point.y, 0) / points.length,
++  }
++}
++
++function textureUrl(land: any) {
++  const level = Math.min(5, Math.max(1, Number(land?.level) || 1))
++  if (Number(land?.plantSize) > 1)
++    return `/game-config/land_images/land_valid${level}_2x2.png`
++  if (land?.status === 'locked')
++    return '/game-config/land_images/land_locked.png'
++  return `/game-config/land_images/${land?.needWater ? `land_dry${level}` : `land_valid${level}`}.png`
++}
++
++function loadImage(src: string) {
++  const cached = farmSceneImageCache.get(src)
++  if (cached)
++    return Promise.resolve(cached)
++  return new Promise<HTMLImageElement>((resolve, reject) => {
++    const image = new Image()
++    image.onload = () => {
++      farmSceneImageCache.set(src, image)
++      resolve(image)
++    }
++    image.onerror = reject
++    image.src = src
++  })
++}
++
++async function draw() {
++  if (!visible.value)
++    return
++  await nextTick()
++  const context = canvas.value?.getContext('2d')
++  if (!context)
++    return
++  context.clearRect(0, 0, width, height)
++  const field = await loadImage('/game-config/scene_images/farm-field-base.png').catch(() => null)
++  if (field) {
++    const scale = 1.16
++    context.drawImage(field, (width - width * scale) / 2 + 10, (height - height * scale) / 2 + 8, width * scale, height * scale)
++  }
++  const lands = [...displayLands.value].sort((a, b) => position(a).y - position(b).y)
++  const textures = await Promise.all(lands.map(land => loadImage(textureUrl(land)).catch(() => null)))
++  lands.forEach((land, index) => {
++    if (selectedLandId.value === Number(land?.id) || !textures[index])
++      return
++    const { x, y } = position(land)
++    const large = Number(land?.plantSize) > 1
++    const drawWidth = large ? mergedWidth : landWidth
++    const drawHeight = large ? mergedHeight : landHeight
++    if (Number(land?.level) === 5 && !large) {
++      context.save()
++      context.translate(x, y)
++      context.rotate(Math.PI)
++      context.drawImage(textures[index]!, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight)
++      context.restore()
++    }
++    else {
++      context.drawImage(textures[index]!, x - drawWidth / 2, y - drawHeight / 2, drawWidth, drawHeight)
++    }
++  })
++}
++
++function landStyle(land: any) {
++  const { x, y } = position(land)
++  const large = Number(land?.plantSize) > 1
++  const drawWidth = large ? mergedWidth : landWidth
++  const drawHeight = large ? mergedHeight : landHeight
++  return {
++    left: `${x / width * 100}%`,
++    top: `${(y - drawHeight / 2) / height * 100}%`,
++    width: `${drawWidth / width * 100}%`,
++    height: `${drawHeight / height * 100}%`,
++    zIndex: Math.round(y) + (large ? 2 : 1),
++  }
++}
++
++function selectLand(land: any) {
++  const id = Number(land?.id) || null
++  selectedLandId.value = selectedLandId.value === id ? null : id
++  if (id !== null)
++    emit('select', land)
++}
++
++function handleDocumentPointerDown(event: PointerEvent) {
++  if (selectedLandId.value === null)
++    return
++  const target = event.target
++  if (target instanceof Element && target.closest('.land-card, .land-bubble'))
++    return
++  selectedLandId.value = null
++}
++
++function handleDocumentKeydown(event: KeyboardEvent) {
++  if (event.key === 'Escape')
++    selectedLandId.value = null
++}
++
++watch(canvasSignature, draw, { flush: 'post' })
++watch(selectedLandId, draw)
++watch(visible, (isVisible) => {
++  if (isVisible)
++    draw()
++})
++onMounted(() => {
++  document.addEventListener('pointerdown', handleDocumentPointerDown)
++  document.addEventListener('keydown', handleDocumentKeydown)
++  if (!viewport.value)
++    return
++  visibilityObserver = new IntersectionObserver(([entry]) => {
++    visible.value = Boolean(entry?.isIntersecting)
++  }, { rootMargin: '160px 0px' })
++  visibilityObserver.observe(viewport.value)
++})
++onUnmounted(() => {
++  visibilityObserver?.disconnect()
++  document.removeEventListener('pointerdown', handleDocumentPointerDown)
++  document.removeEventListener('keydown', handleDocumentKeydown)
++})
++</script>
++
++<template>
++  <div ref="viewport" class="farm-scene-viewport" :class="{ 'farm-scene-selected': selectedLandId !== null }">
++    <div class="farm-scene-stage">
++      <canvas ref="canvas" class="farm-scene-canvas" :width="visible ? width : 1" :height="visible ? height : 1" aria-hidden="true" />
++      <div v-if="weather?.rainstorm" class="farm-rainstorm-effect" aria-hidden="true">
++        <img class="farm-rain-fog" src="/game-config/effect_images/rain-poem/rain-fog.png" alt="">
++        <div class="farm-rain-streaks farm-rain-streaks-a" />
++        <div class="farm-rain-streaks farm-rain-streaks-b" />
++        <div class="farm-thunder-flash" />
++      </div>
++      <LandCard
++        v-for="land in displayLands"
++        :key="land.id"
++        :land="land"
++        isometric
++        :style="landStyle(land)"
++        :selected="selectedLandId === Number(land.id)"
++        :selection-active="selectedLandId !== null"
++        :show-actions="false"
++        @select="selectLand"
++        @fertilize="emit('fertilize', land)"
++        @remove="emit('remove', land)"
++      />
++    </div>
++  </div>
++</template>
++
++<style scoped>
++.farm-scene-viewport {
++  container-type: inline-size;
++  overflow: hidden;
++  width: 100%;
++  max-width: 1200px;
++  margin-inline: auto;
++  border-radius: 1rem;
++  background: #a8d85d;
++  box-shadow: inset 0 0 0 1px rgb(53 101 37 / 18%);
++}
++.farm-scene-stage {
++  position: relative;
++  isolation: isolate;
++  width: 100%;
++  aspect-ratio: 1200 / 650;
++}
++.farm-scene-canvas {
++  position: absolute;
++  z-index: 0;
++  inset: 0;
++  display: block;
++  width: 100%;
++  height: 100%;
++  pointer-events: none;
++}
++.farm-scene-selected :deep(.land-card:not(.land-card-selected) .land-bubble) {
++  display: none !important;
++}
++.farm-rainstorm-effect {
++  position: absolute;
++  z-index: 1000;
++  inset: 0;
++  overflow: hidden;
++  pointer-events: none;
++  background: rgb(15 32 55 / 18%);
++}
++.farm-rain-fog,
++.farm-rain-streaks,
++.farm-thunder-flash {
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++}
++.farm-rain-fog {
++  object-fit: cover;
++  opacity: 0.18;
++  mix-blend-mode: screen;
++  animation: farm-rain-fog-drift 8s ease-in-out infinite alternate;
++}
++.farm-rain-streaks {
++  inset: -24%;
++  width: 148%;
++  height: 148%;
++  background: url('/game-config/effect_images/rain-poem/rain-streaks.png') repeat;
++  background-size: 36% auto;
++  opacity: 0.52;
++  filter: drop-shadow(1px 2px 1px rgb(155 211 255 / 42%));
++  transform: rotate(4deg);
++  animation: farm-rain-fall 0.78s linear infinite;
++}
++.farm-rain-streaks-b {
++  background-size: 25% auto;
++  opacity: 0.28;
++  transform: rotate(7deg) scaleX(-1);
++  animation-delay: -0.4s;
++  animation-duration: 1.08s;
++}
++.farm-thunder-flash {
++  background: rgb(208 235 255 / 72%);
++  opacity: 0;
++  animation: farm-thunder-flash 7.5s steps(1, end) infinite;
++}
++.farm-scene-stage :deep(.land-card) {
++  border-color: transparent;
++  background: transparent;
++  box-shadow: none;
++}
++.farm-scene-stage :deep(.land-card-image) {
++  position: absolute;
++  left: 50%;
++  top: 35%;
++  width: 42%;
++  height: 68%;
++  margin: 0;
++  transform: translate(-50%, -50%);
++}
++.farm-scene-stage :deep(.land-card-image-seed-single) {
++  top: 50%;
++}
++.farm-scene-stage :deep(.land-card-image-seed img) {
++  width: 23%;
++  max-width: none;
++}
++.farm-scene-stage :deep(.land-isometric-size-2 .land-card-image) {
++  left: 50%;
++  top: auto;
++  bottom: 42%;
++  width: 56%;
++  height: 54%;
++  align-items: flex-end;
++  transform: translateX(-50%);
++}
++.farm-scene-stage :deep(.land-isometric-size-2 .land-card-image-seed) {
++  top: 50%;
++  bottom: auto;
++  align-items: center;
++  transform: translate(-50%, -50%);
++}
++.farm-scene-stage :deep(.land-isometric-size-2 .land-card-image-seed img) {
++  width: 13%;
++}
++.farm-scene-stage :deep(.land-isometric-size-2 .land-card-image-paradise .land-crop-image) {
++  width: 100%;
++  height: 100%;
++  max-width: 100%;
++  max-height: 100%;
++  transform: scale(1.35);
++  transform-origin: 50% 82%;
++  object-fit: contain;
++}
++.farm-scene-stage :deep(.land-card-name),
++.farm-scene-stage :deep(.land-card-meta),
++.farm-scene-stage :deep(.land-card-season),
++.farm-scene-stage :deep(.land-card-flags),
++.farm-scene-stage :deep(.land-mutant-effects),
++.farm-scene-stage :deep(.land-ground-single),
++.farm-scene-stage :deep(.land-ground-merged) {
++  display: none;
++}
++.farm-scene-stage :deep(.land-card-selected .land-ground-single),
++.farm-scene-stage :deep(.land-card-selected .land-ground-merged) {
++  display: block;
++  left: 50%;
++  top: 50%;
++  width: 100%;
++  height: 100%;
++  max-height: none;
++  object-fit: fill;
++  opacity: 1;
++  transform: translate(-50%, -50%);
++  filter: saturate(1.08) brightness(1.06) drop-shadow(0 10px 7px rgb(62 46 27 / 35%));
++}
++.farm-scene-stage :deep(.land-card-selected .land-ground-single.land-ground-rotated),
++.farm-scene-stage :deep(.land-card-selected .land-ground-merged.land-ground-rotated) {
++  transform: translate(-50%, -50%) rotate(180deg);
++}
++.farm-scene-stage :deep(.land-card-selected .land-ground-layer) {
++  inset: 0;
++}
++.farm-scene-stage :deep(.land-isometric-size-2 .land-ground-merged) {
++  width: 100%;
++  max-height: none;
++}
++.farm-scene-stage :deep(.land-isometric-size-2 .land-ground-layer) {
++  inset: 0;
++}
++@media (max-width: 639px) {
++  .farm-scene-stage :deep(.land-card) {
++    padding: 1px;
++  }
++  .farm-scene-stage :deep(.land-card-id) {
++    font-size: 8px;
++  }
++}
++@keyframes farm-rain-fall {
++  from {
++    background-position: 0 -45%;
++  }
++  to {
++    background-position: -5% 0;
++  }
++}
++@keyframes farm-rain-fog-drift {
++  from {
++    transform: translateX(-4%) scale(1.08);
++  }
++  to {
++    transform: translateX(4%) scale(1.12);
++  }
++}
++@keyframes farm-thunder-flash {
++  0%,
++  3%,
++  5%,
++  48%,
++  51%,
++  100% {
++    opacity: 0;
++  }
++  2%,
++  4% {
++    opacity: 0.75;
++  }
++  49% {
++    opacity: 0.42;
++  }
++}
++@media (prefers-reduced-motion: reduce) {
++  .farm-rain-fog,
++  .farm-rain-streaks,
++  .farm-thunder-flash {
++    animation: none;
++  }
++  .farm-rain-streaks-b,
++  .farm-thunder-flash {
++    display: none;
++  }
++}
++</style>
+diff --git a/web/src/components/OfficialBichonMutation.vue b/web/src/components/OfficialBichonMutation.vue
+new file mode 100644
+index 0000000..e2c6b85
+--- /dev/null
++++ b/web/src/components/OfficialBichonMutation.vue
+@@ -0,0 +1,28 @@
++<script setup lang="ts">
++const bichonMaskImage = '/game-config/effect_images/mutant/bichon/11.png'
++</script>
++
++<template>
++  <img
++    :src="bichonMaskImage"
++    class="official-bichon-mutation"
++    alt=""
++    aria-hidden="true"
++  >
++</template>
++
++<style scoped>
++.official-bichon-mutation {
++  position: absolute;
++  z-index: 4;
++  left: 50%;
++  top: 50%;
++  width: 155%;
++  height: 155%;
++  max-width: none;
++  transform: translate(-50%, -50%);
++  object-fit: contain;
++  pointer-events: none;
++  filter: drop-shadow(0 1px 1px rgb(92 65 22 / 24%));
++}
++</style>
+diff --git a/web/src/components/OfficialCrystalMutation.vue b/web/src/components/OfficialCrystalMutation.vue
+new file mode 100644
+index 0000000..6bc5611
+--- /dev/null
++++ b/web/src/components/OfficialCrystalMutation.vue
+@@ -0,0 +1,40 @@
++<script setup lang="ts">
++import '../styles/official-crystal-animation.css'
++const starImage = '/game-config/effect_images/mutant/jinghui/star.png'
++</script>
++
++<template>
++  <!-- Original prefab coordinates and default clip; viewBox scales it to the crop. -->
++  <svg class="official-crystal-mutation" viewBox="-70 -70 140 140" aria-hidden="true">
++    <g
++      v-for="index in 9"
++      :key="index"
++      :style="{ animationName: `official-crystal-${index - 1}` }"
++    >
++      <image :href="starImage" x="-105" y="-105" width="210" height="210" />
++    </g>
++  </svg>
++</template>
++
++<style scoped>
++.official-crystal-mutation {
++  position: absolute;
++  inset: 0;
++  width: 100%;
++  height: 100%;
++  pointer-events: none;
++  z-index: 3;
++}
++
++.official-crystal-mutation g {
++  animation-duration: 1.3333333333333333s;
++  animation-timing-function: linear;
++  animation-iteration-count: infinite;
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .official-crystal-mutation g {
++    animation-play-state: paused;
++  }
++}
++</style>
+diff --git a/web/src/components/SceneLandCard.vue b/web/src/components/SceneLandCard.vue
+new file mode 100644
+index 0000000..60603ea
+--- /dev/null
++++ b/web/src/components/SceneLandCard.vue
+@@ -0,0 +1,1522 @@
++<script setup lang="ts">
++import OfficialCrystalMutation from './OfficialCrystalMutation.vue'
++import OfficialBichonMutation from './OfficialBichonMutation.vue'
++import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
++
++const props = withDefaults(defineProps<{
++  land: any
++  showActions?: boolean
++  farmGrid?: boolean
++  farmGridRowOffset?: number
++  isometric?: boolean
++  selected?: boolean
++  selectionActive?: boolean
++}>(), {
++  showActions: true,
++  farmGrid: false,
++  farmGridRowOffset: 0,
++  isometric: false,
++  selected: false,
++  selectionActive: false,
++})
++
++const emit = defineEmits<{
++  (e: 'fertilize', land: any): void
++  (e: 'remove', land: any): void
++  (e: 'select', land: any): void
++}>()
++
++const land = computed(() => props.land)
++const now = ref(Date.now())
++const cardElement = ref<HTMLElement | null>(null)
++const bubbleElement = ref<HTMLElement | null>(null)
++const floatingBubbleStyle = ref<Record<string, string>>({})
++const floatingBubbleBelow = ref(false)
++let timer: ReturnType<typeof setInterval> | null = null
++
++const floatingBubbleVisible = computed(() => props.selected)
++
++async function updateFloatingBubblePosition() {
++  if (!props.isometric || !floatingBubbleVisible.value)
++    return
++  await nextTick()
++  const card = cardElement.value
++  const bubble = bubbleElement.value
++  if (!card || !bubble)
++    return
++  const cardRect = card.getBoundingClientRect()
++  const width = bubble.offsetWidth
++  const height = bubble.offsetHeight
++  const gap = 10
++  const margin = 8
++  const spaceAbove = cardRect.top - margin - gap
++  const spaceBelow = window.innerHeight - cardRect.bottom - margin - gap
++  const below = spaceAbove < height && spaceBelow > spaceAbove
++  const idealTop = below ? cardRect.bottom + gap : cardRect.top - height - gap
++  const left = Math.min(window.innerWidth - width - margin, Math.max(margin, cardRect.left + cardRect.width / 2 - width / 2))
++  const top = Math.min(window.innerHeight - height - margin, Math.max(margin, idealTop))
++  floatingBubbleBelow.value = below
++  floatingBubbleStyle.value = {
++    '--bubble-arrow-left': `${Math.min(width - 18, Math.max(18, cardRect.left + cardRect.width / 2 - left))}px`,
++    'left': `${left}px`,
++    'top': `${top}px`,
++  }
++}
++
++function handleBubbleAction(type: 'fertilize' | 'remove') {
++  if (type === 'fertilize')
++    emit('fertilize', land.value)
++  else
++    emit('remove', land.value)
++}
++
++onMounted(() => {
++  timer = setInterval(() => {
++    now.value = Date.now()
++  }, 1000)
++  window.addEventListener('resize', updateFloatingBubblePosition)
++  window.addEventListener('scroll', updateFloatingBubblePosition, true)
++})
++
++onUnmounted(() => {
++  if (timer)
++    clearInterval(timer)
++  window.removeEventListener('resize', updateFloatingBubblePosition)
++  window.removeEventListener('scroll', updateFloatingBubblePosition, true)
++})
++
++const isFertilizable = computed(() =>
++  Number(land.value?.matureInSec) > 0
++  && land.value?.status !== 'locked'
++  && land.value?.status !== 'empty',
++)
++
++const isRemovable = computed(() =>
++  land.value?.status !== 'locked'
++  && land.value?.status !== 'empty'
++  && Boolean(
++    land.value?.plantName
++    || land.value?.seedImage
++    || Number(land.value?.matureInSec) > 0
++    || ['dead', 'growing', 'harvestable', 'stealable'].includes(String(land.value?.status || '')),
++  ),
++)
++
++const canFertilize = computed(() => props.showActions && isFertilizable.value)
++const canRemove = computed(() => props.showActions && isRemovable.value)
++
++const landTextureName = computed(() => {
++  const targetLand = land.value || {}
++  const level = Math.min(5, Math.max(1, Number(targetLand.level) || 1))
++  const isSnow = Boolean(
++    targetLand.isSnow
++    || targetLand.snow
++    || targetLand.snowy
++    || String(targetLand.weather || '').toLowerCase() === 'snow',
++  )
++
++  if (targetLand.status === 'locked')
++    return isSnow ? 'land_locked_snow' : 'land_locked'
++
++  if (targetLand.needWater) {
++    if (level === 1 && isSnow)
++      return 'land_dry1_snow'
++    return `land_dry${level}`
++  }
++
++  if (level === 1 && isSnow)
++    return 'land_valid1_snow'
++  return `land_valid${level}`
++})
++
++const landTextureUrl = computed(() => {
++  if (Number(land.value?.plantSize) > 1)
++    return `/game-config/land_images/land_valid${Math.min(5, Math.max(1, Number(land.value?.level) || 1))}_2x2.png`
++  return `/game-config/land_images/${landTextureName.value}.png`
++})
++
++const shouldRotateLandTexture = computed(() => {
++  const level = Number(land.value?.level) || 1
++  // 与 FarmPanel 的 Canvas 保持一致，避免选中 2x2 土地后再次翻转。
++  return level === 5 && Number(land.value?.plantSize) <= 1
++})
++
++const mutantEffects = computed(() => {
++  const effects = Array.isArray(land.value?.mutantEffects) ? land.value.mutantEffects : []
++  return effects
++    .map((effect: any) => {
++      const icon = String(effect?.icon || '').trim()
++      return {
++        id: Number(effect?.id) || 0,
++        name: String(effect?.name || effect?.effect_name || icon || '变异').trim(),
++        icon,
++        image: icon === 'lightning'
++          ? '/activity/rain-poem/lightning-sense.png?v=2'
++          : (icon ? `/game-config/seed_images_named/mutant/${icon}.png` : ''),
++        tag: String(effect?.tag || '').trim(),
++        description: String(effect?.description || effect?.desc || effect?.tips || '').trim(),
++      }
++    })
++    .filter((effect: any) => effect.icon)
++})
++
++const hasGoldenMutation = computed(() => mutantEffects.value.some((effect: any) =>
++  effect.id === 5 || effect.icon.toLowerCase() === 'golden',
++))
++
++function hasMutation(id: number, icon: string) {
++  return mutantEffects.value.some((effect: any) =>
++    effect.id === id || effect.icon.toLowerCase() === icon,
++  )
++}
++
++const hasFrozenMutation = computed(() => hasMutation(1, 'frozen'))
++const hasLoveMutation = computed(() => hasMutation(2, 'love'))
++const hasDarkMutation = computed(() => hasMutation(3, 'dark'))
++const hasMoistMutation = computed(() => hasMutation(4, 'moist'))
++const hasLightningMutation = computed(() => hasMutation(12, 'lightning'))
++const hasCrystalMutation = computed(() => hasMutation(14, 'crystal'))
++const hasBichonMutation = computed(() => hasMutation(15, 'bichon'))
++const hasParadiseMutation = computed(() => hasMutation(16, 'leyuan'))
++const darkSmokeImageUrl = '/game-config/effect_images/mutant/dark-smoke.png'
++const darkParticleImageUrl = '/game-config/effect_images/mutant/dark-particle.png'
++
++// seedImage 是背包物品图标，不能用于地块；plantImage 包含客户端通用种子贴图
++// model/v4/zhongzi，以及各作物从 Crop_*_2 开始的生长阶段贴图。
++const cropImageUrl = computed(() => {
++  return String(land.value?.plantImage || '').trim()
++})
++
++function getLandStatusClass(targetLand: any) {
++  const status = targetLand.status
++  const level = Number(targetLand.level) || 0
++
++  if (status === 'locked')
++    return 'land-level-locked bg-slate-50/90 dark:bg-slate-900/80 border-slate-300 dark:border-slate-700 border-dashed'
++
++  const baseClass = `land-level-${Math.min(5, Math.max(1, level || 1))} bg-stone-50/90 dark:bg-stone-950/80 border-stone-300 dark:border-stone-700`
++
++  if (status === 'dead')
++    return 'bg-gray-200 dark:bg-gray-700 border-gray-300 dark:border-gray-600 grayscale'
++
++  if (status === 'harvestable')
++    return `${baseClass} ring-2 ring-yellow-500 ring-offset-1 dark:ring-offset-gray-900`
++
++  if (status === 'stealable')
++    return `${baseClass} ring-2 ring-purple-500 ring-offset-1 dark:ring-offset-gray-900`
++
++  if (mutantEffects.value.length > 0)
++    return `${baseClass} ring-1 ring-pink-300 dark:ring-pink-700`
++
++  return baseClass
++}
++
++function formatTime(sec: number) {
++  if (sec <= 0)
++    return ''
++
++  const wholeSeconds = Math.floor(sec)
++  const h = Math.floor(wholeSeconds / 3600)
++  const m = Math.floor((wholeSeconds % 3600) / 60)
++  const s = wholeSeconds % 60
++  return `${h > 0 ? `${h}:` : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
++}
++
++const statusLabel = computed(() => {
++  const status = String(land.value?.status || '')
++  const phaseName = String(land.value?.phaseName || '').trim()
++
++  // “生长中”只是地块的操作状态；详情里应展示当前作物阶段。
++  // 否则种子、发芽、小叶、大叶和开花期都会被错误地显示成同一个状态。
++  if (status === 'growing' && phaseName)
++    return phaseName
++
++  const labels: Record<string, string> = {
++    harvestable: '可收获',
++    stealable: '可采摘',
++    harvested: '已成熟',
++    growing: '生长中',
++    dead: '已枯萎',
++    empty: '空闲',
++    locked: '未解锁',
++  }
++  return labels[status] || phaseName || '未知状态'
++})
++
++const phaseProgress = computed(() => {
++  const start = Number(land.value?.phaseStartTime) || 0
++  const end = Number(land.value?.phaseEndTime) || 0
++  if (end > start) {
++    const duration = end - start
++    const elapsed = Math.min(duration, Math.max(0, now.value / 1000 - start))
++    return {
++      percent: Math.round(elapsed / duration * 100),
++      elapsed,
++      duration,
++    }
++  }
++  if (['harvestable', 'stealable', 'harvested', 'dead'].includes(String(land.value?.status || ''))) {
++    return { percent: 100, elapsed: 0, duration: 0 }
++  }
++  return null
++})
++
++watch(floatingBubbleVisible, updateFloatingBubblePosition, { flush: 'post' })
++watch(() => [phaseProgress.value?.percent, mutantEffects.value.length], updateFloatingBubblePosition, { flush: 'post' })
++
++function getSafeImageUrl(url: string) {
++  if (!url)
++    return ''
++  if (url.startsWith('http://'))
++    return url.replace('http://', 'https://')
++  return url
++}
++
++function getFarmGridStyle(targetLand: any) {
++  if (!props.farmGrid)
++    return undefined
++
++  const occupiedIds = Array.isArray(targetLand?.occupiedLandIds)
++    ? targetLand.occupiedLandIds.map(Number).filter((id: number) => id > 0)
++    : []
++  const anchorId = occupiedIds.length > 1
++    ? Math.min(...occupiedIds)
++    : Number(targetLand?.id)
++  if (!anchorId)
++    return undefined
++
++  return {
++    gridColumnStart: ((anchorId - 1) % 4) + 1,
++    gridRowStart: Math.max(1, Math.floor((anchorId - 1) / 4) + 1 - props.farmGridRowOffset),
++  }
++}
++
++function getFarmGridColumnClass(targetLand: any) {
++  if (!props.farmGrid && !props.isometric)
++    return ''
++  const occupiedIds = Array.isArray(targetLand?.occupiedLandIds)
++    ? targetLand.occupiedLandIds.map(Number).filter((id: number) => id > 0)
++    : []
++  const anchorId = occupiedIds.length > 1 ? Math.min(...occupiedIds) : Number(targetLand?.id)
++  return anchorId ? `land-grid-column-${((anchorId - 1) % 4) + 1}` : ''
++}
++
++function getIsometricBubbleClass(targetLand: any) {
++  if (!props.isometric)
++    return ''
++  const occupiedIds = Array.isArray(targetLand?.occupiedLandIds)
++    ? targetLand.occupiedLandIds.map(Number).filter((id: number) => id > 0)
++    : []
++  const anchorId = occupiedIds.length > 1 ? Math.min(...occupiedIds) : Number(targetLand?.id)
++  if (!anchorId)
++    return ''
++  const column = (anchorId - 1) % 4
++  const row = Math.floor((anchorId - 1) / 4)
++  return column + row <= 1 ? 'land-bubble-below' : ''
++}
++</script>
++
++<template>
++  <div
++    ref="cardElement"
++    class="land-card relative h-full min-h-0 flex flex-col cursor-pointer items-center rounded-lg px-2 pb-11 pt-2 transition"
++    :class="[
++      getLandStatusClass(land),
++      getFarmGridColumnClass(land),
++      getIsometricBubbleClass(land),
++      {
++        'col-span-2 row-span-2 justify-center px-4 pt-3': !isometric && Number(land.plantSize) > 1,
++        'land-isometric': isometric,
++        'land-isometric-size-2': isometric && Number(land.plantSize) > 1,
++        'land-card-selected': selected,
++      },
++    ]"
++    :style="getFarmGridStyle(land)"
++    :role="isometric ? undefined : 'button'"
++    :aria-label="isometric ? undefined : `土地 #${land.id} ${land.plantName || ''}`"
++    :aria-pressed="isometric ? undefined : selected"
++    :tabindex="isometric ? undefined : 0"
++    @click="!isometric && $emit('select', land)"
++    @keydown.enter.prevent="!isometric && $emit('select', land)"
++    @keydown.space.prevent="!isometric && $emit('select', land)"
++  >
++    <button
++      v-if="isometric"
++      type="button"
++      class="land-hit-area absolute"
++      :aria-label="`土地 #${land.id} ${land.plantName || ''}`"
++      :aria-pressed="selected"
++      @click.stop="$emit('select', land)"
++    />
++    <div
++      class="land-ground-layer pointer-events-none absolute inset-0"
++      aria-hidden="true"
++    >
++      <img
++        :src="landTextureUrl"
++        alt=""
++        :class="[
++          Number(land.plantSize) > 1 ? 'land-ground-merged' : 'land-ground-single',
++          { 'land-ground-rotated': shouldRotateLandTexture },
++        ]"
++      >
++    </div>
++
++    <div class="land-card-id absolute left-1 top-1 text-[10px] text-gray-400 font-mono">
++      #{{ land.id }}
++    </div>
++
++    <div
++      v-if="land?.qixiDew?.applied"
++      class="qixi-dew-effect pointer-events-none absolute"
++      title="鹊羽灵露已生效"
++      aria-label="鹊羽灵露已生效"
++    >
++      <img class="qixi-dew-feather qixi-dew-feather-1" src="/game-config/effect_images/qixi-dew/effect_yumao.png" alt="">
++      <img class="qixi-dew-feather qixi-dew-feather-2" src="/game-config/effect_images/qixi-dew/effect_yumao.png" alt="">
++      <img class="qixi-dew-feather qixi-dew-feather-3" src="/game-config/effect_images/qixi-dew/effect_yumao.png" alt="">
++      <img class="qixi-dew-feather qixi-dew-feather-4" src="/game-config/effect_images/qixi-dew/effect_yumao.png" alt="">
++      <img class="qixi-dew-feather qixi-dew-feather-5" src="/game-config/effect_images/qixi-dew/effect_yumao.png" alt="">
++    </div>
++
++    <div
++      v-if="mutantEffects.length > 0"
++      class="land-mutant-effects absolute left-1 top-5 flex flex-col gap-1"
++    >
++      <img
++        v-for="effect in mutantEffects"
++        :key="`${land.id}-${effect.id}-${effect.icon}`"
++        :src="effect.image"
++        :alt="effect.name"
++        :title="effect.tag && effect.tag !== '无' ? `${effect.name} · ${effect.tag}` : effect.name"
++        class="h-4 w-4 rounded-sm object-contain drop-shadow-sm"
++        loading="lazy"
++      >
++    </div>
++
++    <div
++      class="land-card-image mb-0.5 mt-3 flex shrink-0 items-center justify-center"
++      :class="[
++        Number(land.plantSize) > 1 ? 'h-16 w-16' : 'h-9 w-9',
++        {
++          'land-card-image-seed': Number(land.imagePhase) === 1,
++          'land-card-image-seed-single': Number(land.imagePhase) === 1 && Number(land.plantSize) <= 1,
++          'land-card-image-golden': hasGoldenMutation && Boolean(cropImageUrl),
++          'land-card-image-frozen': hasFrozenMutation && Boolean(cropImageUrl),
++          'land-card-image-love': hasLoveMutation && Boolean(cropImageUrl),
++          'land-card-image-dark': hasDarkMutation && Boolean(cropImageUrl),
++          'land-card-image-moist': hasMoistMutation && Boolean(cropImageUrl),
++          'land-card-image-lightning': hasLightningMutation && Boolean(cropImageUrl),
++          'land-card-image-pet-mutation': (hasCrystalMutation || hasBichonMutation) && Boolean(cropImageUrl),
++          'land-card-image-paradise': hasParadiseMutation && Boolean(cropImageUrl),
++        },
++      ]"
++    >
++      <div v-if="hasGoldenMutation && cropImageUrl" class="golden-mutation-aura" aria-hidden="true" />
++      <div v-if="hasGoldenMutation && cropImageUrl" class="golden-mutation-sparkles" aria-hidden="true">
++        <i v-for="index in 6" :key="index" />
++      </div>
++      <div v-if="hasFrozenMutation && cropImageUrl" class="frozen-mutation-layer" aria-hidden="true">
++        <i v-for="index in 6" :key="index">✦</i>
++      </div>
++      <div v-if="hasLoveMutation && cropImageUrl" class="love-mutation-layer" aria-hidden="true">
++        <i v-for="index in 5" :key="index">♥</i>
++      </div>
++      <div v-if="hasDarkMutation && cropImageUrl" class="dark-mutation-layer" aria-hidden="true">
++        <img v-for="index in 4" :key="`smoke-${index}`" :src="darkSmokeImageUrl" alt="" class="dark-mutation-smoke">
++        <img v-for="index in 5" :key="`particle-${index}`" :src="darkParticleImageUrl" alt="" class="dark-mutation-particle">
++      </div>
++      <div v-if="hasMoistMutation && cropImageUrl" class="moist-mutation-layer" aria-hidden="true">
++        <i v-for="index in 4" :key="index" />
++      </div>
++      <div v-if="hasLightningMutation && cropImageUrl" class="lightning-mutation-layer" aria-hidden="true">
++        <img
++          v-for="index in 4"
++          :key="`lightning-frame-${index}`"
++          :src="`/game-config/effect_images/rain-poem/lightning-0${index - 1}.png`"
++          :class="`lightning-mutation-frame lightning-mutation-frame-${index}`"
++          alt=""
++        >
++      </div>
++      <OfficialCrystalMutation
++        v-if="hasCrystalMutation && cropImageUrl && !['dead', 'empty', 'locked'].includes(land.status)"
++      />
++      <OfficialBichonMutation
++        v-if="hasBichonMutation && cropImageUrl && !['dead', 'empty', 'locked'].includes(land.status)"
++      />
++      <img
++        v-if="cropImageUrl"
++        :src="getSafeImageUrl(cropImageUrl)"
++        class="land-crop-image max-h-full max-w-full object-contain"
++        loading="lazy"
++        referrerpolicy="no-referrer"
++      >
++      <div v-else-if="Number(land.phase) !== 1" class="i-carbon-sprout text-xl text-gray-300" />
++    </div>
++
++    <div
++      class="land-card-name w-full shrink-0 truncate px-1 text-center text-gray-900 font-bold leading-5 dark:text-gray-100"
++      :class="Number(land.plantSize) > 1 ? 'text-sm' : 'text-xs'"
++      :title="land.plantName"
++    >
++      {{ land.plantName || '-' }}
++    </div>
++
++    <div class="land-card-meta mb-0.5 mt-0.5 w-full shrink-0 text-center text-[10px] text-gray-500">
++      <span v-if="land.matureInSec > 0" class="text-orange-800 font-medium dark:text-orange-300">
++        预计 {{ formatTime(land.matureInSec) }} 后成熟
++      </span>
++      <span v-else>
++        {{ land.phaseName || (land.status === 'locked' ? '未解锁' : '未开垦') }}
++      </span>
++    </div>
++
++    <div class="mb-0.5 mt-0.5 flex shrink-0 items-center justify-center gap-1.5">
++      <span class="land-card-season whitespace-nowrap text-[10px] text-gray-800 font-medium dark:text-gray-200">
++        季数 {{ land.totalSeason > 0 ? (`${land.currentSeason}/${land.totalSeason}`) : '-/-' }}
++      </span>
++    </div>
++
++    <div class="land-card-flags min-h-4 flex shrink-0 origin-bottom scale-90 gap-0.5 text-[10px]">
++      <span v-if="land.needWater" class="rounded bg-blue-100 px-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" title="需要浇水"><span v-if="isometric" class="i-carbon-rain-drop" /><template v-else>水</template></span>
++      <span v-if="land.needWeed" class="rounded bg-green-100 px-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400" title="需要除草"><span v-if="isometric" class="i-carbon-sprout" /><template v-else>草</template></span>
++      <span v-if="land.needBug" class="rounded bg-red-100 px-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400" title="需要除虫"><span v-if="isometric" class="i-carbon-warning-alt" /><template v-else>虫</template></span>
++      <span v-if="land.status === 'harvestable'" class="rounded bg-orange-100 px-0.5 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">可收</span>
++      <span v-else-if="land.status === 'stealable'" class="rounded bg-purple-100 px-0.5 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">可偷</span>
++    </div>
++
++    <div
++      v-if="canFertilize || canRemove"
++      class="land-actions absolute bottom-2 left-2 right-2 grid grid-cols-2 h-7 gap-1"
++    >
++      <button
++        v-if="canFertilize"
++        type="button"
++        class="land-action-button text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-900/30"
++        title="催熟"
++        @click.stop="$emit('fertilize', land)"
++      >
++        <span class="i-carbon-growth text-sm" />
++        <span>催熟</span>
++      </button>
++      <div v-else />
++
++      <button
++        v-if="canRemove"
++        type="button"
++        class="land-action-button text-red-700 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-900/30"
++        title="铲除作物"
++        @click.stop="$emit('remove', land)"
++      >
++        <span class="i-carbon-trash-can text-sm" />
++        <span>铲除</span>
++      </button>
++    </div>
++
++    <Teleport v-if="farmGrid || isometric" to="body" :disabled="!isometric">
++      <div
++        v-show="!isometric || floatingBubbleVisible"
++        ref="bubbleElement"
++        class="land-bubble"
++        :class="{
++          'land-bubble-floating': isometric,
++          'land-bubble-floating-below': isometric && floatingBubbleBelow,
++        }"
++        :style="isometric ? floatingBubbleStyle : undefined"
++        role="dialog"
++        :aria-label="`土地 #${land.id} 详情`"
++        @click.stop
++      >
++        <div class="flex items-start justify-between gap-3">
++          <div class="min-w-0">
++            <div class="text-[10px] text-gray-400">
++              土地 #{{ land.id }}
++            </div>
++            <div class="truncate text-sm text-gray-900 font-bold dark:text-gray-100">
++              {{ land.plantName || '未种植' }}
++            </div>
++          </div>
++          <span class="shrink-0 rounded-full bg-green-100 px-2 py-0.5 text-[10px] text-green-700 font-medium dark:bg-green-900/30 dark:text-green-300">{{ statusLabel }}</span>
++        </div>
++
++        <div class="grid grid-cols-2 mt-2 gap-2 text-xs">
++          <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/60">
++            <div class="text-[10px] text-gray-400">
++              成熟倒计时
++            </div>
++            <div class="mt-0.5 font-semibold tabular-nums">
++              {{ land.matureInSec > 0 ? formatTime(land.matureInSec) : '—' }}
++            </div>
++          </div>
++          <div class="rounded-lg bg-gray-50 p-2 dark:bg-gray-900/60">
++            <div class="text-[10px] text-gray-400">
++              生长季数
++            </div>
++            <div class="mt-0.5 font-semibold">
++              {{ land.totalSeason > 0 ? `${land.currentSeason}/${land.totalSeason}` : '—' }}
++            </div>
++          </div>
++        </div>
++
++        <div v-if="phaseProgress" class="mt-2 rounded-lg bg-emerald-50 p-2 dark:bg-emerald-950/30">
++          <div class="flex items-center justify-between gap-2 text-[11px]">
++            <span class="truncate text-emerald-700 font-medium dark:text-emerald-300">
++              {{ land.phaseName || '当前阶段' }}
++            </span>
++            <span class="shrink-0 text-emerald-600 font-semibold tabular-nums dark:text-emerald-300">
++              {{ phaseProgress.percent }}%
++            </span>
++          </div>
++          <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-900/60">
++            <div
++              class="h-full rounded-full bg-emerald-500 transition-[width] duration-300"
++              :style="{ width: `${phaseProgress.percent}%` }"
++            />
++          </div>
++          <div v-if="phaseProgress.duration > 0" class="mt-1 flex justify-between text-[10px] text-gray-400 tabular-nums">
++            <span>已进行 {{ formatTime(phaseProgress.elapsed) }}</span>
++            <span>本阶段 {{ formatTime(phaseProgress.duration) }}</span>
++          </div>
++        </div>
++
++        <div v-if="mutantEffects.length > 0" class="mt-2 rounded-lg bg-pink-50 p-2 dark:bg-pink-950/30">
++          <div class="mb-1 text-[10px] text-pink-500 font-medium dark:text-pink-300">
++            变异效果
++          </div>
++          <div class="flex flex-wrap gap-1.5">
++            <div
++              v-for="effect in mutantEffects"
++              :key="`bubble-${land.id}-${effect.id}-${effect.icon}`"
++              class="inline-flex items-center gap-1 rounded-full bg-white px-2 py-1 text-[11px] text-pink-700 shadow-sm dark:bg-gray-900 dark:text-pink-200"
++            >
++              <img :src="effect.image" :alt="effect.name" class="h-4 w-4 object-contain">
++              <span class="font-medium">{{ effect.name }}</span>
++              <span v-if="effect.tag && effect.tag !== '无'" class="text-[10px] text-pink-400">· {{ effect.tag }}</span>
++            </div>
++          </div>
++          <div class="mt-2 rounded-md bg-white/85 px-2 py-1.5 text-[11px] text-pink-700 shadow-sm space-y-1 dark:bg-gray-900/85 dark:text-pink-200">
++            <div v-for="effect in mutantEffects" :key="`description-${effect.id}-${effect.icon}`">
++              {{ effect.description || effect.name }}
++            </div>
++          </div>
++        </div>
++
++        <div v-if="land.needWater || land.needWeed || land.needBug" class="mt-2 flex flex-wrap gap-1 text-[10px]">
++          <span v-if="land.needWater" class="rounded-full bg-blue-100 px-2 py-0.5 text-blue-700">需要浇水</span>
++          <span v-if="land.needWeed" class="rounded-full bg-green-100 px-2 py-0.5 text-green-700">需要除草</span>
++          <span v-if="land.needBug" class="rounded-full bg-red-100 px-2 py-0.5 text-red-700">需要除虫</span>
++        </div>
++
++        <div v-if="isFertilizable || isRemovable" class="grid grid-cols-2 mt-2 gap-2">
++          <button type="button" class="bubble-action border-emerald-600 text-emerald-700 dark:text-emerald-300" :disabled="!isFertilizable" @click="handleBubbleAction('fertilize')">
++            <span class="i-carbon-growth" />催熟
++          </button>
++          <button type="button" class="bubble-action border-red-500 text-red-600 dark:text-red-300" :disabled="!isRemovable" @click="handleBubbleAction('remove')">
++            <span class="i-carbon-trash-can" />铲除
++          </button>
++        </div>
++      </div>
++    </Teleport>
++  </div>
++</template>
++
++<style scoped>
++.qixi-dew-effect {
++  z-index: 6;
++  left: 50%;
++  top: 46%;
++  width: 70%;
++  height: 72%;
++  transform: translate(-50%, -50%);
++  overflow: hidden;
++}
++
++.qixi-dew-effect img {
++  position: absolute;
++  display: block;
++  object-fit: contain;
++  user-select: none;
++}
++
++.qixi-dew-feather {
++  top: -20%;
++  width: 22%;
++  opacity: 0;
++  transform-origin: center;
++  filter: brightness(1.55) saturate(0.7) drop-shadow(0 0 3px rgb(255 244 249 / 0.82));
++  animation: qixi-dew-feather-fall 4.8s linear infinite backwards;
++}
++
++.qixi-dew-feather-1 {
++  left: 4%;
++  animation-delay: -0.4s;
++}
++
++.qixi-dew-feather-2 {
++  left: 26%;
++  width: 17%;
++  animation-delay: -3.2s;
++  animation-duration: 5.4s;
++}
++
++.qixi-dew-feather-3 {
++  left: 48%;
++  width: 24%;
++  animation-delay: -1.8s;
++  animation-duration: 5.8s;
++}
++
++.qixi-dew-feather-4 {
++  left: 68%;
++  width: 15%;
++  animation-delay: -4.3s;
++  animation-duration: 4.5s;
++}
++
++.qixi-dew-feather-5 {
++  left: 81%;
++  width: 12%;
++  animation-delay: -2.7s;
++  animation-duration: 6.2s;
++}
++
++.land-isometric-size-2 .qixi-dew-effect {
++  top: 45%;
++  width: 52%;
++  height: 68%;
++}
++
++@keyframes qixi-dew-feather-fall {
++  0% {
++    opacity: 0;
++    transform: translate3d(-8%, -8%, 0) rotate(-18deg) scale(0.72);
++  }
++  16% {
++    opacity: 0.3;
++    transform: translate3d(10%, 18%, 0) rotate(4deg) scale(0.82);
++  }
++  42% {
++    opacity: 0.58;
++    transform: translate3d(-12%, 58%, 0) rotate(-12deg) scale(0.92);
++  }
++  72% {
++    opacity: 0.4;
++    transform: translate3d(14%, 108%, 0) rotate(11deg) scale(1);
++  }
++  100% {
++    opacity: 0;
++    transform: translate3d(-5%, 160%, 0) rotate(-8deg) scale(1.05);
++  }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .qixi-dew-effect img {
++    animation: none !important;
++  }
++  .qixi-dew-feather {
++    display: none;
++  }
++  .qixi-dew-feather-3 {
++    display: block;
++    top: 38%;
++    opacity: 0.38;
++    transform: rotate(-8deg);
++  }
++}
++
++.land-card-image-golden {
++  position: relative;
++  isolation: isolate;
++  overflow: hidden;
++  border-radius: 42%;
++}
++
++.land-card-image-golden .land-crop-image {
++  position: relative;
++  z-index: 2;
++  animation: golden-crop-glow 2.4s ease-in-out infinite;
++}
++
++.golden-mutation-aura {
++  position: absolute;
++  z-index: 0;
++  inset: -6%;
++  border-radius: 50%;
++  pointer-events: none;
++  background: radial-gradient(
++    circle,
++    rgb(255 248 184 / 0.78) 0 24%,
++    rgb(250 204 21 / 0.38) 43%,
++    rgb(245 158 11 / 0.12) 62%,
++    transparent 74%
++  );
++  filter: blur(2px);
++  animation: golden-aura-pulse 2.4s ease-in-out infinite;
++}
++
++.golden-mutation-sparkles {
++  position: absolute;
++  z-index: 3;
++  inset: 0;
++  overflow: hidden;
++  border-radius: 44%;
++  pointer-events: none;
++  animation: golden-sparkle-orbit 9s linear infinite;
++}
++
++.golden-mutation-sparkles i {
++  position: absolute;
++  width: 4px;
++  height: 4px;
++  border-radius: 50%;
++  background: #fff8a6;
++  box-shadow: 0 0 4px 1px rgb(250 204 21 / 0.9);
++  animation: golden-sparkle-blink 1.8s ease-in-out infinite;
++}
++
++.golden-mutation-sparkles i:nth-child(1) {
++  left: 12%;
++  top: 24%;
++}
++.golden-mutation-sparkles i:nth-child(2) {
++  right: 10%;
++  top: 18%;
++  animation-delay: -0.6s;
++}
++.golden-mutation-sparkles i:nth-child(3) {
++  right: 2%;
++  top: 57%;
++  animation-delay: -1.2s;
++}
++.golden-mutation-sparkles i:nth-child(4) {
++  bottom: 8%;
++  left: 62%;
++  animation-delay: -0.3s;
++}
++.golden-mutation-sparkles i:nth-child(5) {
++  bottom: 14%;
++  left: 9%;
++  animation-delay: -0.9s;
++}
++.golden-mutation-sparkles i:nth-child(6) {
++  left: 42%;
++  top: 2%;
++  animation-delay: -1.5s;
++}
++
++.land-card-image-pet-mutation,
++.land-card-image-frozen,
++.land-card-image-love,
++.land-card-image-dark,
++.land-card-image-moist,
++.land-card-image-lightning {
++  position: relative;
++  isolation: isolate;
++  overflow: hidden;
++  border-radius: 42%;
++}
++
++.land-card-image-frozen .land-crop-image {
++  position: relative;
++  z-index: 2;
++  animation: frozen-crop-glow 2.8s ease-in-out infinite;
++}
++
++.frozen-mutation-layer,
++.love-mutation-layer,
++.dark-mutation-layer,
++.moist-mutation-layer,
++.lightning-mutation-layer {
++  position: absolute;
++  z-index: 3;
++  inset: 0;
++  overflow: hidden;
++  border-radius: 42%;
++  pointer-events: none;
++}
++
++.frozen-mutation-layer {
++  background: transparent;
++}
++
++.frozen-mutation-layer i {
++  position: absolute;
++  color: #e0f2fe;
++  font-size: 7px;
++  text-shadow: 0 0 4px #38bdf8;
++  animation: frozen-crystal-twinkle 1.9s ease-in-out infinite;
++}
++
++.frozen-mutation-layer i:nth-child(1) {
++  left: 4%;
++  top: 22%;
++}
++.frozen-mutation-layer i:nth-child(2) {
++  right: 5%;
++  top: 12%;
++  animation-delay: -0.5s;
++}
++.frozen-mutation-layer i:nth-child(3) {
++  right: -1%;
++  top: 56%;
++  animation-delay: -1s;
++}
++.frozen-mutation-layer i:nth-child(4) {
++  bottom: 3%;
++  left: 66%;
++  animation-delay: -1.5s;
++}
++.frozen-mutation-layer i:nth-child(5) {
++  bottom: 8%;
++  left: 5%;
++  animation-delay: -0.8s;
++}
++.frozen-mutation-layer i:nth-child(6) {
++  left: 45%;
++  top: -5%;
++  animation-delay: -1.3s;
++}
++
++.land-card-image-love .land-crop-image,
++.land-card-image-dark .land-crop-image {
++  position: relative;
++  z-index: 2;
++}
++
++.land-card-image-love .land-crop-image {
++  filter: saturate(1.22) brightness(1.05) drop-shadow(0 0 5px rgb(244 63 94 / 0.82));
++}
++
++.love-mutation-layer i {
++  position: absolute;
++  bottom: -2px;
++  color: #ff2f6d;
++  font-size: 10px;
++  font-style: normal;
++  line-height: 1;
++  text-shadow:
++    0 0 2px #fff,
++    0 0 5px rgb(244 63 94 / 0.95);
++  animation: love-heart-rise 2.2s ease-in infinite;
++}
++
++.love-mutation-layer i:nth-child(1) {
++  left: 8%;
++}
++.love-mutation-layer i:nth-child(2) {
++  left: 28%;
++  animation-delay: -0.7s;
++}
++.love-mutation-layer i:nth-child(3) {
++  left: 48%;
++  animation-delay: -1.4s;
++}
++.love-mutation-layer i:nth-child(4) {
++  left: 68%;
++  animation-delay: -2.1s;
++}
++.love-mutation-layer i:nth-child(5) {
++  left: 86%;
++  animation-delay: -2.5s;
++}
++
++.land-card-image-dark .land-crop-image {
++  animation: dark-crop-pulse 3.2s ease-in-out infinite;
++}
++
++.dark-mutation-smoke,
++.dark-mutation-particle {
++  position: absolute;
++  object-fit: contain;
++  pointer-events: none;
++}
++
++.dark-mutation-smoke {
++  width: 58%;
++  opacity: 0;
++  filter: sepia(1) saturate(2.2) hue-rotate(225deg) brightness(0.48);
++  mix-blend-mode: multiply;
++  animation: dark-smoke-drift 3.6s ease-in-out infinite;
++}
++
++.dark-mutation-smoke:nth-child(1) {
++  bottom: 4%;
++  left: -4%;
++}
++.dark-mutation-smoke:nth-child(2) {
++  right: -7%;
++  bottom: 8%;
++  animation-delay: -0.9s;
++}
++.dark-mutation-smoke:nth-child(3) {
++  top: 12%;
++  left: 5%;
++  animation-delay: -1.8s;
++}
++.dark-mutation-smoke:nth-child(4) {
++  top: 4%;
++  right: 2%;
++  animation-delay: -2.7s;
++}
++
++.dark-mutation-particle {
++  width: 13%;
++  opacity: 0;
++  filter: sepia(1) saturate(3) hue-rotate(220deg) brightness(0.7);
++  animation: dark-particle-flicker 2.4s ease-in-out infinite;
++}
++
++.dark-mutation-particle:nth-child(5) {
++  left: 10%;
++  top: 24%;
++}
++.dark-mutation-particle:nth-child(6) {
++  right: 8%;
++  top: 18%;
++  animation-delay: -0.5s;
++}
++.dark-mutation-particle:nth-child(7) {
++  bottom: 10%;
++  left: 28%;
++  animation-delay: -1s;
++}
++.dark-mutation-particle:nth-child(8) {
++  right: 22%;
++  bottom: 8%;
++  animation-delay: -1.5s;
++}
++.dark-mutation-particle:nth-child(9) {
++  left: 46%;
++  top: 4%;
++  animation-delay: -2s;
++}
++
++.moist-mutation-layer i {
++  position: absolute;
++  top: -5px;
++  width: 3px;
++  height: 5px;
++  border-radius: 50% 50% 55% 55%;
++  background: rgb(56 189 248 / 0.9);
++  box-shadow: 0 0 1px rgb(255 255 255 / 0.85);
++  animation: moist-drop-fall 1.6s linear infinite;
++}
++
++.moist-mutation-layer i:nth-child(1) {
++  left: 15%;
++}
++.moist-mutation-layer i:nth-child(2) {
++  left: 39%;
++  animation-delay: -0.8s;
++}
++.moist-mutation-layer i:nth-child(3) {
++  left: 63%;
++  animation-delay: -0.4s;
++}
++.moist-mutation-layer i:nth-child(4) {
++  left: 84%;
++  animation-delay: -1.2s;
++}
++
++.land-card-image-lightning .land-crop-image {
++  position: relative;
++  z-index: 2;
++}
++
++.lightning-mutation-layer {
++  z-index: 4;
++  overflow: visible;
++}
++
++.lightning-mutation-frame {
++  position: absolute;
++  left: 50%;
++  top: 50%;
++  width: 145%;
++  height: 145%;
++  object-fit: contain;
++  opacity: 0;
++  transform: translate(-50%, -50%);
++  animation: official-lightning-frame 1s steps(1, end) infinite;
++}
++
++.lightning-mutation-frame-2 {
++  animation-delay: -0.75s;
++}
++.lightning-mutation-frame-3 {
++  animation-delay: -0.5s;
++}
++.lightning-mutation-frame-4 {
++  animation-delay: -0.25s;
++}
++
++@keyframes golden-crop-glow {
++  0%,
++  100% {
++    filter: sepia(1) saturate(3.6) hue-rotate(345deg) brightness(1.08) contrast(1.08)
++      drop-shadow(0 0 3px rgb(250 204 21 / 0.72));
++  }
++  50% {
++    filter: sepia(1) saturate(4.8) hue-rotate(350deg) brightness(1.2) contrast(1.12)
++      drop-shadow(0 0 8px rgb(245 158 11 / 0.98));
++  }
++}
++
++@keyframes golden-aura-pulse {
++  0%,
++  100% {
++    opacity: 0.62;
++    transform: scale(0.88);
++  }
++  50% {
++    opacity: 1;
++    transform: scale(1.08);
++  }
++}
++
++@keyframes golden-sparkle-orbit {
++  to {
++    transform: rotate(360deg);
++  }
++}
++
++@keyframes golden-sparkle-blink {
++  0%,
++  100% {
++    opacity: 0.2;
++    transform: scale(0.55);
++  }
++  50% {
++    opacity: 1;
++    transform: scale(1.25);
++  }
++}
++
++@keyframes frozen-crop-glow {
++  0%,
++  100% {
++    filter: saturate(0.72) hue-rotate(72deg) brightness(1.13) contrast(1.04)
++      drop-shadow(0 0 3px rgb(125 211 252 / 0.78));
++  }
++  50% {
++    filter: saturate(0.62) hue-rotate(82deg) brightness(1.24) contrast(1.08) drop-shadow(0 0 6px rgb(56 189 248 / 0.94));
++  }
++}
++
++@keyframes frozen-crystal-twinkle {
++  0%,
++  100% {
++    opacity: 0.24;
++    transform: scale(0.65) rotate(0);
++  }
++  50% {
++    opacity: 1;
++    transform: scale(1.2) rotate(45deg);
++  }
++}
++
++@keyframes love-heart-rise {
++  0% {
++    opacity: 0;
++    transform: translateY(2px) scale(0.7) rotate(-8deg);
++  }
++  28% {
++    opacity: 0.95;
++  }
++  100% {
++    opacity: 0;
++    transform: translateY(-21px) scale(1.15) rotate(10deg);
++  }
++}
++
++@keyframes dark-crop-pulse {
++  0%,
++  100% {
++    filter: saturate(0.78) brightness(0.82) contrast(1.06) hue-rotate(8deg) drop-shadow(0 0 2px rgb(76 29 149 / 0.42));
++  }
++  50% {
++    filter: saturate(0.84) brightness(0.88) contrast(1.08) hue-rotate(13deg) drop-shadow(0 0 3px rgb(109 40 217 / 0.52));
++  }
++}
++
++@keyframes dark-smoke-drift {
++  0%,
++  100% {
++    opacity: 0;
++    transform: translateY(3px) scale(0.72) rotate(-8deg);
++  }
++  35% {
++    opacity: 0.24;
++  }
++  65% {
++    opacity: 0.14;
++    transform: translateY(-5px) scale(1.04) rotate(6deg);
++  }
++}
++
++@keyframes dark-particle-flicker {
++  0%,
++  100% {
++    opacity: 0;
++    transform: translateY(3px) scale(0.55);
++  }
++  45% {
++    opacity: 0.55;
++    transform: translateY(-2px) scale(0.9);
++  }
++  70% {
++    opacity: 0.18;
++    transform: translateY(-6px) scale(0.7);
++  }
++}
++
++@keyframes moist-drop-fall {
++  0% {
++    opacity: 0;
++    transform: translateY(0);
++  }
++  15% {
++    opacity: 0.9;
++  }
++  80% {
++    opacity: 0.9;
++  }
++  100% {
++    opacity: 0;
++    transform: translateY(36px);
++  }
++}
++
++@keyframes official-lightning-frame {
++  0%,
++  24.99% {
++    opacity: 1;
++  }
++  25%,
++  100% {
++    opacity: 0;
++  }
++}
++
++@media (prefers-reduced-motion: reduce) {
++  .land-card-image-golden .land-crop-image,
++  .golden-mutation-aura,
++  .golden-mutation-sparkles,
++  .golden-mutation-sparkles i,
++  .land-card-image-frozen .land-crop-image,
++  .land-card-image-dark .land-crop-image,
++  .frozen-mutation-layer i,
++  .love-mutation-layer i,
++  .dark-mutation-smoke,
++  .dark-mutation-particle,
++  .moist-mutation-layer i,
++  .lightning-mutation-frame {
++    animation: none;
++  }
++
++  .lightning-mutation-frame-1 {
++    opacity: 1;
++  }
++
++  .land-card-image-golden .land-crop-image {
++    filter: sepia(1) saturate(4.2) hue-rotate(348deg) brightness(1.14) contrast(1.1)
++      drop-shadow(0 0 5px rgb(250 204 21 / 0.8));
++  }
++}
++
++.land-ground-layer {
++  z-index: 0;
++}
++
++.land-card-selected {
++  z-index: 100 !important;
++  box-shadow:
++    0 0 0 3px rgb(59 130 246 / 0.88),
++    0 8px 20px rgb(15 23 42 / 0.2);
++}
++
++.land-isometric.land-card-selected {
++  box-shadow: none;
++  transform: translate(-50%, -8px) scale(1.02);
++}
++
++.land-isometric.land-card-selected .land-card-image {
++  z-index: 1;
++  filter: saturate(1.08) brightness(1.06) drop-shadow(0 7px 5px rgb(56 42 25 / 0.28));
++}
++
++.land-isometric {
++  position: absolute;
++  pointer-events: none;
++  padding: 2px;
++  transform: translateX(-50%);
++  transform-origin: 50% 50%;
++}
++
++.land-hit-area {
++  z-index: 2;
++  left: 2%;
++  top: 8%;
++  width: 96%;
++  height: 80%;
++  cursor: pointer;
++  pointer-events: auto;
++  border: 0;
++  background: transparent;
++  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
++}
++
++.land-bubble {
++  position: absolute;
++  z-index: 30 !important;
++  left: 50%;
++  top: calc(100% + 6px);
++  width: min(240px, calc(100vw - 40px));
++  display: none;
++  padding: 12px;
++  border: 1px solid rgb(226 232 240);
++  border-radius: 12px;
++  background: rgb(255 255 255 / 0.98);
++  color: #334155;
++  text-align: left;
++  box-shadow: 0 14px 32px rgb(15 23 42 / 0.24);
++  transform: translateX(-50%);
++}
++
++.land-bubble::before {
++  position: absolute;
++  left: 50%;
++  top: -7px;
++  width: 12px;
++  height: 12px;
++  content: '';
++  border-left: 1px solid rgb(226 232 240);
++  border-top: 1px solid rgb(226 232 240);
++  background: inherit;
++  transform: translateX(-50%) rotate(45deg);
++}
++
++.land-bubble-floating {
++  position: fixed;
++  z-index: 1000 !important;
++  right: auto;
++  display: block;
++  pointer-events: auto;
++  transform: none;
++}
++
++.land-bubble-floating::before {
++  left: var(--bubble-arrow-left, 50%);
++  top: auto;
++  bottom: -7px;
++  border: 0;
++  border-right: 1px solid rgb(226 232 240);
++  border-bottom: 1px solid rgb(226 232 240);
++}
++
++.land-bubble-floating.land-bubble-floating-below::before {
++  top: -7px;
++  bottom: auto;
++  border: 0;
++  border-left: 1px solid rgb(226 232 240);
++  border-top: 1px solid rgb(226 232 240);
++}
++
++.land-card-selected .land-bubble {
++  display: block;
++}
++
++.land-grid-column-1 .land-bubble {
++  left: 0;
++  transform: none;
++}
++
++.land-grid-column-1 .land-bubble::before {
++  left: 25%;
++}
++
++.land-grid-column-4 .land-bubble {
++  right: 0;
++  left: auto;
++  transform: none;
++}
++
++.land-grid-column-4 .land-bubble::before {
++  right: 25%;
++  left: auto;
++}
++
++.land-isometric .land-card-id {
++  display: none;
++}
++
++.land-isometric .land-bubble {
++  top: 4px;
++  transform: translate(-50%, calc(-100% - 8px));
++}
++
++.land-isometric .land-bubble::before {
++  top: auto;
++  bottom: -7px;
++  border: 0;
++  border-right: 1px solid rgb(226 232 240);
++  border-bottom: 1px solid rgb(226 232 240);
++}
++
++.land-isometric.land-grid-column-1 .land-bubble,
++.land-isometric.land-grid-column-4 .land-bubble {
++  transform: translateY(calc(-100% - 8px));
++}
++
++.land-isometric.land-bubble-below .land-bubble {
++  top: calc(100% - 8px);
++  transform: translateX(-50%);
++}
++
++.land-isometric.land-bubble-below .land-bubble::before {
++  top: -7px;
++  bottom: auto;
++  border: 0;
++  border-left: 1px solid rgb(226 232 240);
++  border-top: 1px solid rgb(226 232 240);
++}
++
++.land-isometric.land-bubble-below.land-grid-column-1 .land-bubble,
++.land-isometric.land-bubble-below.land-grid-column-4 .land-bubble {
++  transform: none;
++}
++
++.bubble-action {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 4px;
++  min-height: 32px;
++  border-width: 1px;
++  border-radius: 8px;
++  font-size: 12px;
++  font-weight: 600;
++}
++
++.bubble-action:disabled {
++  cursor: not-allowed;
++  opacity: 0.35;
++}
++
++:global(.dark) .land-bubble {
++  border-color: #475569;
++  background: rgb(31 41 55 / 0.98);
++  color: #e5e7eb;
++}
++
++.land-ground-single {
++  position: absolute;
++  left: 50%;
++  top: 47%;
++  width: 94%;
++  height: auto;
++  max-height: 68%;
++  object-fit: contain;
++  transform: translate(-50%, -50%);
++  opacity: 0.82;
++  filter: saturate(1.05) drop-shadow(0 3px 4px rgba(71, 53, 35, 0.16));
++}
++
++.land-card.col-span-2 .land-ground-layer,
++.land-card.land-isometric-size-2 .land-ground-layer {
++  left: 7%;
++  right: 7%;
++  top: 12%;
++  bottom: 15%;
++}
++
++.land-ground-merged {
++  position: absolute;
++  left: 50%;
++  top: 48%;
++  width: 94%;
++  height: auto;
++  max-height: 74%;
++  object-fit: contain;
++  transform: translate(-50%, -50%);
++  opacity: 0.82;
++  filter: saturate(1.05) drop-shadow(0 3px 4px rgba(71, 53, 35, 0.14));
++}
++
++.land-ground-single.land-ground-rotated,
++.land-ground-merged.land-ground-rotated {
++  transform: translate(-50%, -50%) rotate(180deg);
++}
++
++.land-card > :not(.land-ground-layer) {
++  z-index: 1;
++}
++
++.land-card-name,
++.land-card-meta,
++.land-card-season {
++  text-shadow:
++    0 1px 2px rgba(255, 255, 255, 0.95),
++    0 0 5px rgba(255, 255, 255, 0.88);
++}
++
++:global(.dark) .land-card-name,
++:global(.dark) .land-card-meta,
++:global(.dark) .land-card-season {
++  text-shadow:
++    0 1px 2px rgba(0, 0, 0, 0.95),
++    0 0 5px rgba(0, 0, 0, 0.8);
++}
++
++.land-action-button {
++  height: 28px;
++  min-width: 0;
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  gap: 3px;
++  border-radius: 6px;
++  background: rgba(255, 255, 255, 0.78);
++  font-size: 11px;
++  font-weight: 600;
++  line-height: 1;
++  box-shadow: inset 0 0 0 1px currentColor;
++  transition:
++    background-color 0.15s ease,
++    transform 0.15s ease;
++}
++
++.land-action-button:hover {
++  transform: translateY(-1px);
++}
++
++.land-level-black .land-card-id,
++.land-level-black .land-card-meta,
++.land-level-black .land-card-season {
++  color: #475569;
++}
++
++:global(.dark) .land-level-black .land-card-id,
++:global(.dark) .land-level-black .land-card-meta,
++:global(.dark) .land-level-black .land-card-season {
++  color: #cbd5e1;
++}
++
++.land-level-black .land-card-name {
++  color: #111827;
++  text-shadow: none;
++}
++
++:global(.dark) .land-level-black .land-card-name {
++  color: #f8fafc;
++  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.65);
++}
++
++.land-level-black .land-action-button {
++  background: rgba(255, 255, 255, 0.78);
++}
++
++:global(.dark) .land-level-black .land-action-button {
++  background: rgba(255, 255, 255, 0.9);
++}
++</style>
+diff --git a/web/src/styles/official-crystal-animation.css b/web/src/styles/official-crystal-animation.css
+new file mode 100644
+index 0000000..6c56fdd
+--- /dev/null
++++ b/web/src/styles/official-crystal-animation.css
+@@ -0,0 +1,748 @@
++/* Generated from official Cocos curves; run core/scripts/generate-crystal-animation.py. */
++@keyframes official-crystal-0 {
++  0% { transform: translate(-44.9210px, 4.5000px) scale(0.18349, 0.18349); }
++  1.25% { transform: translate(-44.9210px, 4.5000px) scale(0.18421, 0.18421); }
++  2.5% { transform: translate(-44.9210px, 4.5000px) scale(0.18493, 0.18493); }
++  3.75% { transform: translate(-44.9210px, 4.5000px) scale(0.18566, 0.18566); }
++  5% { transform: translate(-44.9210px, 4.5000px) scale(0.18638, 0.18638); }
++  6.25% { transform: translate(-44.9210px, 4.5000px) scale(0.18710, 0.18710); }
++  7.5% { transform: translate(-44.9210px, 4.5000px) scale(0.18783, 0.18783); }
++  8.75% { transform: translate(-44.9210px, 4.5000px) scale(0.18855, 0.18855); }
++  10% { transform: translate(-44.9210px, 4.5000px) scale(0.18928, 0.18928); }
++  11.25% { transform: translate(-44.9210px, 4.5000px) scale(0.19000, 0.19000); }
++  12.5% { transform: translate(-44.9210px, 4.5000px) scale(0.18922, 0.18922); }
++  13.75% { transform: translate(-44.9210px, 4.5000px) scale(0.18787, 0.18787); }
++  15% { transform: translate(-44.9210px, 4.5000px) scale(0.18595, 0.18595); }
++  16.25% { transform: translate(-44.9210px, 4.5000px) scale(0.18343, 0.18343); }
++  17.5% { transform: translate(-44.9210px, 4.5000px) scale(0.18029, 0.18029); }
++  18.75% { transform: translate(-44.9210px, 4.5000px) scale(0.17652, 0.17652); }
++  20% { transform: translate(-44.9210px, 4.5000px) scale(0.17210, 0.17210); }
++  21.25% { transform: translate(-44.9210px, 4.5000px) scale(0.16703, 0.16703); }
++  22.5% { transform: translate(-44.9210px, 4.5000px) scale(0.16130, 0.16130); }
++  23.75% { transform: translate(-44.9210px, 4.5000px) scale(0.15491, 0.15491); }
++  25% { transform: translate(-44.9210px, 4.5000px) scale(0.14788, 0.14788); }
++  26.25% { transform: translate(-44.9210px, 4.5000px) scale(0.14022, 0.14022); }
++  27.5% { transform: translate(-44.9210px, 4.5000px) scale(0.13197, 0.13197); }
++  28.75% { transform: translate(-44.9210px, 4.5000px) scale(0.12317, 0.12317); }
++  30% { transform: translate(-44.9210px, 4.5000px) scale(0.11388, 0.11388); }
++  31.25% { transform: translate(-44.9210px, 4.5000px) scale(0.10420, 0.10420); }
++  32.5% { transform: translate(-44.9210px, 4.5000px) scale(0.09422, 0.09422); }
++  33.75% { transform: translate(-44.9210px, 4.5000px) scale(0.08407, 0.08407); }
++  35% { transform: translate(-44.9210px, 4.5000px) scale(0.07387, 0.07387); }
++  36.25% { transform: translate(-44.9210px, 4.5000px) scale(0.06379, 0.06379); }
++  37.5% { transform: translate(-44.9210px, 4.5000px) scale(0.05398, 0.05398); }
++  38.75% { transform: translate(-44.9210px, 4.5000px) scale(0.04460, 0.04460); }
++  40% { transform: translate(-44.9210px, 4.5000px) scale(0.03582, 0.03582); }
++  41.25% { transform: translate(-44.9210px, 4.5000px) scale(0.02777, 0.02777); }
++  42.5% { transform: translate(-44.9210px, 4.5000px) scale(0.02059, 0.02059); }
++  43.75% { transform: translate(-44.9210px, 4.5000px) scale(0.01438, 0.01438); }
++  45% { transform: translate(-44.9210px, 4.5000px) scale(0.00923, 0.00923); }
++  46.25% { transform: translate(-44.9210px, 4.5000px) scale(0.00519, 0.00519); }
++  47.5% { transform: translate(-44.9210px, 4.5000px) scale(0.00230, 0.00230); }
++  48.75% { transform: translate(-44.9210px, 4.5000px) scale(0.00057, 0.00057); }
++  50% { transform: translate(-44.9210px, 4.5000px) scale(0.00000, 0.00000); }
++  51.25% { transform: translate(-44.9210px, 4.5000px) scale(0.00063, 0.00063); }
++  52.5% { transform: translate(-44.9210px, 4.5000px) scale(0.00167, 0.00167); }
++  53.75% { transform: translate(-44.9210px, 4.5000px) scale(0.00317, 0.00317); }
++  55% { transform: translate(-44.9210px, 4.5000px) scale(0.00514, 0.00514); }
++  56.25% { transform: translate(-44.9210px, 4.5000px) scale(0.00763, 0.00763); }
++  57.5% { transform: translate(-44.9210px, 4.5000px) scale(0.01067, 0.01067); }
++  58.75% { transform: translate(-44.9210px, 4.5000px) scale(0.01429, 0.01429); }
++  60% { transform: translate(-44.9210px, 4.5000px) scale(0.01854, 0.01854); }
++  61.25% { transform: translate(-44.9210px, 4.5000px) scale(0.02343, 0.02343); }
++  62.5% { transform: translate(-44.9210px, 4.5000px) scale(0.02899, 0.02899); }
++  63.75% { transform: translate(-44.9210px, 4.5000px) scale(0.03524, 0.03524); }
++  65% { transform: translate(-44.9210px, 4.5000px) scale(0.04218, 0.04218); }
++  66.25% { transform: translate(-44.9210px, 4.5000px) scale(0.04978, 0.04978); }
++  67.5% { transform: translate(-44.9210px, 4.5000px) scale(0.05799, 0.05799); }
++  68.75% { transform: translate(-44.9210px, 4.5000px) scale(0.06672, 0.06672); }
++  70% { transform: translate(-44.9210px, 4.5000px) scale(0.07586, 0.07586); }
++  71.25% { transform: translate(-44.9210px, 4.5000px) scale(0.08526, 0.08526); }
++  72.5% { transform: translate(-44.9210px, 4.5000px) scale(0.09474, 0.09474); }
++  73.75% { transform: translate(-44.9210px, 4.5000px) scale(0.10414, 0.10414); }
++  75% { transform: translate(-44.9210px, 4.5000px) scale(0.11328, 0.11328); }
++  76.25% { transform: translate(-44.9210px, 4.5000px) scale(0.12201, 0.12201); }
++  77.5% { transform: translate(-44.9210px, 4.5000px) scale(0.13022, 0.13022); }
++  78.75% { transform: translate(-44.9210px, 4.5000px) scale(0.13782, 0.13782); }
++  80% { transform: translate(-44.9210px, 4.5000px) scale(0.14476, 0.14476); }
++  81.25% { transform: translate(-44.9210px, 4.5000px) scale(0.15101, 0.15101); }
++  82.5% { transform: translate(-44.9210px, 4.5000px) scale(0.15657, 0.15657); }
++  83.75% { transform: translate(-44.9210px, 4.5000px) scale(0.16146, 0.16146); }
++  85% { transform: translate(-44.9210px, 4.5000px) scale(0.16571, 0.16571); }
++  86.25% { transform: translate(-44.9210px, 4.5000px) scale(0.16933, 0.16933); }
++  87.5% { transform: translate(-44.9210px, 4.5000px) scale(0.17237, 0.17237); }
++  88.75% { transform: translate(-44.9210px, 4.5000px) scale(0.17486, 0.17486); }
++  90% { transform: translate(-44.9210px, 4.5000px) scale(0.17683, 0.17683); }
++  91.25% { transform: translate(-44.9210px, 4.5000px) scale(0.17833, 0.17833); }
++  92.5% { transform: translate(-44.9210px, 4.5000px) scale(0.17937, 0.17937); }
++  93.75% { transform: translate(-44.9210px, 4.5000px) scale(0.18000, 0.18000); }
++  95% { transform: translate(-44.9210px, 4.5000px) scale(0.18065, 0.18065); }
++  96.25% { transform: translate(-44.9210px, 4.5000px) scale(0.18136, 0.18136); }
++  97.5% { transform: translate(-44.9210px, 4.5000px) scale(0.18218, 0.18218); }
++  98.75% { transform: translate(-44.9210px, 4.5000px) scale(0.18322, 0.18322); }
++  100% { transform: translate(-44.9210px, 4.5000px) scale(0.18349, 0.18349); }
++}
++@keyframes official-crystal-1 {
++  0% { transform: translate(-26.5390px, -29.7300px) scale(0.15619, 0.15619); }
++  1.25% { transform: translate(-26.5390px, -29.7300px) scale(0.15855, 0.15855); }
++  2.5% { transform: translate(-26.5390px, -29.7300px) scale(0.16090, 0.16090); }
++  3.75% { transform: translate(-26.5390px, -29.7300px) scale(0.16325, 0.16325); }
++  5% { transform: translate(-26.5390px, -29.7300px) scale(0.16560, 0.16560); }
++  6.25% { transform: translate(-26.5390px, -29.7300px) scale(0.16795, 0.16795); }
++  7.5% { transform: translate(-26.5390px, -29.7300px) scale(0.17030, 0.17030); }
++  8.75% { transform: translate(-26.5390px, -29.7300px) scale(0.17265, 0.17265); }
++  10% { transform: translate(-26.5390px, -29.7300px) scale(0.17500, 0.17500); }
++  11.25% { transform: translate(-26.5390px, -29.7300px) scale(0.17564, 0.17564); }
++  12.5% { transform: translate(-26.5390px, -29.7300px) scale(0.17632, 0.17632); }
++  13.75% { transform: translate(-26.5390px, -29.7300px) scale(0.17702, 0.17702); }
++  15% { transform: translate(-26.5390px, -29.7300px) scale(0.17774, 0.17774); }
++  16.25% { transform: translate(-26.5390px, -29.7300px) scale(0.17849, 0.17849); }
++  17.5% { transform: translate(-26.5390px, -29.7300px) scale(0.17924, 0.17924); }
++  18.75% { transform: translate(-26.5390px, -29.7300px) scale(0.18000, 0.18000); }
++  20% { transform: translate(-26.5390px, -29.7300px) scale(0.18076, 0.18076); }
++  21.25% { transform: translate(-26.5390px, -29.7300px) scale(0.18151, 0.18151); }
++  22.5% { transform: translate(-26.5390px, -29.7300px) scale(0.18226, 0.18226); }
++  23.75% { transform: translate(-26.5390px, -29.7300px) scale(0.18298, 0.18298); }
++  25% { transform: translate(-26.5390px, -29.7300px) scale(0.18368, 0.18368); }
++  26.25% { transform: translate(-26.5390px, -29.7300px) scale(0.18436, 0.18436); }
++  27.5% { transform: translate(-26.5390px, -29.7300px) scale(0.18500, 0.18500); }
++  28.75% { transform: translate(-26.5390px, -29.7300px) scale(0.18463, 0.18463); }
++  30% { transform: translate(-26.5390px, -29.7300px) scale(0.18353, 0.18353); }
++  31.25% { transform: translate(-26.5390px, -29.7300px) scale(0.18169, 0.18169); }
++  32.5% { transform: translate(-26.5390px, -29.7300px) scale(0.17911, 0.17911); }
++  33.75% { transform: translate(-26.5390px, -29.7300px) scale(0.17579, 0.17579); }
++  35% { transform: translate(-26.5390px, -29.7300px) scale(0.17174, 0.17174); }
++  36.25% { transform: translate(-26.5390px, -29.7300px) scale(0.16697, 0.16697); }
++  37.5% { transform: translate(-26.5390px, -29.7300px) scale(0.16149, 0.16149); }
++  38.75% { transform: translate(-26.5390px, -29.7300px) scale(0.15534, 0.15534); }
++  40% { transform: translate(-26.5390px, -29.7300px) scale(0.14855, 0.14855); }
++  41.25% { transform: translate(-26.5390px, -29.7300px) scale(0.14116, 0.14116); }
++  42.5% { transform: translate(-26.5390px, -29.7300px) scale(0.13322, 0.13322); }
++  43.75% { transform: translate(-26.5390px, -29.7300px) scale(0.12479, 0.12479); }
++  45% { transform: translate(-26.5390px, -29.7300px) scale(0.11595, 0.11595); }
++  46.25% { transform: translate(-26.5390px, -29.7300px) scale(0.10677, 0.10677); }
++  47.5% { transform: translate(-26.5390px, -29.7300px) scale(0.09734, 0.09734); }
++  48.75% { transform: translate(-26.5390px, -29.7300px) scale(0.08778, 0.08778); }
++  50% { transform: translate(-26.5390px, -29.7300px) scale(0.07817, 0.07817); }
++  51.25% { transform: translate(-26.5390px, -29.7300px) scale(0.06864, 0.06864); }
++  52.5% { transform: translate(-26.5390px, -29.7300px) scale(0.05930, 0.05930); }
++  53.75% { transform: translate(-26.5390px, -29.7300px) scale(0.05028, 0.05028); }
++  55% { transform: translate(-26.5390px, -29.7300px) scale(0.04168, 0.04168); }
++  56.25% { transform: translate(-26.5390px, -29.7300px) scale(0.03363, 0.03363); }
++  57.5% { transform: translate(-26.5390px, -29.7300px) scale(0.02624, 0.02624); }
++  58.75% { transform: translate(-26.5390px, -29.7300px) scale(0.01960, 0.01960); }
++  60% { transform: translate(-26.5390px, -29.7300px) scale(0.01381, 0.01381); }
++  61.25% { transform: translate(-26.5390px, -29.7300px) scale(0.00895, 0.00895); }
++  62.5% { transform: translate(-26.5390px, -29.7300px) scale(0.00509, 0.00509); }
++  63.75% { transform: translate(-26.5390px, -29.7300px) scale(0.00228, 0.00228); }
++  65% { transform: translate(-26.5390px, -29.7300px) scale(0.00057, 0.00057); }
++  66.25% { transform: translate(-26.5390px, -29.7300px) scale(0.00000, 0.00000); }
++  67.5% { transform: translate(-26.5390px, -29.7300px) scale(0.00025, 0.00025); }
++  68.75% { transform: translate(-26.5390px, -29.7300px) scale(0.00100, 0.00100); }
++  70% { transform: translate(-26.5390px, -29.7300px) scale(0.00231, 0.00231); }
++  71.25% { transform: translate(-26.5390px, -29.7300px) scale(0.00419, 0.00419); }
++  72.5% { transform: translate(-26.5390px, -29.7300px) scale(0.00668, 0.00668); }
++  73.75% { transform: translate(-26.5390px, -29.7300px) scale(0.00982, 0.00982); }
++  75% { transform: translate(-26.5390px, -29.7300px) scale(0.01365, 0.01365); }
++  76.25% { transform: translate(-26.5390px, -29.7300px) scale(0.01821, 0.01821); }
++  77.5% { transform: translate(-26.5390px, -29.7300px) scale(0.02351, 0.02351); }
++  78.75% { transform: translate(-26.5390px, -29.7300px) scale(0.02961, 0.02961); }
++  80% { transform: translate(-26.5390px, -29.7300px) scale(0.03649, 0.03649); }
++  81.25% { transform: translate(-26.5390px, -29.7300px) scale(0.04418, 0.04418); }
++  82.5% { transform: translate(-26.5390px, -29.7300px) scale(0.05264, 0.05264); }
++  83.75% { transform: translate(-26.5390px, -29.7300px) scale(0.06181, 0.06181); }
++  85% { transform: translate(-26.5390px, -29.7300px) scale(0.07160, 0.07160); }
++  86.25% { transform: translate(-26.5390px, -29.7300px) scale(0.08186, 0.08186); }
++  87.5% { transform: translate(-26.5390px, -29.7300px) scale(0.09236, 0.09236); }
++  88.75% { transform: translate(-26.5390px, -29.7300px) scale(0.10287, 0.10287); }
++  90% { transform: translate(-26.5390px, -29.7300px) scale(0.11307, 0.11307); }
++  91.25% { transform: translate(-26.5390px, -29.7300px) scale(0.12267, 0.12267); }
++  92.5% { transform: translate(-26.5390px, -29.7300px) scale(0.13137, 0.13137); }
++  93.75% { transform: translate(-26.5390px, -29.7300px) scale(0.13894, 0.13894); }
++  95% { transform: translate(-26.5390px, -29.7300px) scale(0.14521, 0.14521); }
++  96.25% { transform: translate(-26.5390px, -29.7300px) scale(0.15008, 0.15008); }
++  97.5% { transform: translate(-26.5390px, -29.7300px) scale(0.15352, 0.15352); }
++  98.75% { transform: translate(-26.5390px, -29.7300px) scale(0.15554, 0.15554); }
++  100% { transform: translate(-26.5390px, -29.7300px) scale(0.15619, 0.15619); }
++}
++@keyframes official-crystal-2 {
++  0% { transform: translate(22.4810px, 31.0170px) scale(0.04487, 0.04487); }
++  1.25% { transform: translate(22.4810px, 31.0170px) scale(0.05088, 0.05088); }
++  2.5% { transform: translate(22.4810px, 31.0170px) scale(0.05688, 0.05688); }
++  3.75% { transform: translate(22.4810px, 31.0170px) scale(0.06289, 0.06289); }
++  5% { transform: translate(22.4810px, 31.0170px) scale(0.06889, 0.06889); }
++  6.25% { transform: translate(22.4810px, 31.0170px) scale(0.07490, 0.07490); }
++  7.5% { transform: translate(22.4810px, 31.0170px) scale(0.08091, 0.08091); }
++  8.75% { transform: translate(22.4810px, 31.0170px) scale(0.08691, 0.08691); }
++  10% { transform: translate(22.4810px, 31.0170px) scale(0.09292, 0.09292); }
++  11.25% { transform: translate(22.4810px, 31.0170px) scale(0.09892, 0.09892); }
++  12.5% { transform: translate(22.4810px, 31.0170px) scale(0.10493, 0.10493); }
++  13.75% { transform: translate(22.4810px, 31.0170px) scale(0.11093, 0.11093); }
++  15% { transform: translate(22.4810px, 31.0170px) scale(0.11694, 0.11694); }
++  16.25% { transform: translate(22.4810px, 31.0170px) scale(0.12294, 0.12294); }
++  17.5% { transform: translate(22.4810px, 31.0170px) scale(0.12895, 0.12895); }
++  18.75% { transform: translate(22.4810px, 31.0170px) scale(0.13496, 0.13496); }
++  20% { transform: translate(22.4810px, 31.0170px) scale(0.14096, 0.14096); }
++  21.25% { transform: translate(22.4810px, 31.0170px) scale(0.14697, 0.14697); }
++  22.5% { transform: translate(22.4810px, 31.0170px) scale(0.15297, 0.15297); }
++  23.75% { transform: translate(22.4810px, 31.0170px) scale(0.15898, 0.15898); }
++  25% { transform: translate(22.4810px, 31.0170px) scale(0.16498, 0.16498); }
++  26.25% { transform: translate(22.4810px, 31.0170px) scale(0.17099, 0.17099); }
++  27.5% { transform: translate(22.4810px, 31.0170px) scale(0.17699, 0.17699); }
++  28.75% { transform: translate(22.4810px, 31.0170px) scale(0.18300, 0.18300); }
++  30% { transform: translate(22.4810px, 31.0170px) scale(0.18364, 0.18364); }
++  31.25% { transform: translate(22.4810px, 31.0170px) scale(0.18432, 0.18432); }
++  32.5% { transform: translate(22.4810px, 31.0170px) scale(0.18502, 0.18502); }
++  33.75% { transform: translate(22.4810px, 31.0170px) scale(0.18574, 0.18574); }
++  35% { transform: translate(22.4810px, 31.0170px) scale(0.18649, 0.18649); }
++  36.25% { transform: translate(22.4810px, 31.0170px) scale(0.18724, 0.18724); }
++  37.5% { transform: translate(22.4810px, 31.0170px) scale(0.18800, 0.18800); }
++  38.75% { transform: translate(22.4810px, 31.0170px) scale(0.18876, 0.18876); }
++  40% { transform: translate(22.4810px, 31.0170px) scale(0.18951, 0.18951); }
++  41.25% { transform: translate(22.4810px, 31.0170px) scale(0.19026, 0.19026); }
++  42.5% { transform: translate(22.4810px, 31.0170px) scale(0.19098, 0.19098); }
++  43.75% { transform: translate(22.4810px, 31.0170px) scale(0.19168, 0.19168); }
++  45% { transform: translate(22.4810px, 31.0170px) scale(0.19236, 0.19236); }
++  46.25% { transform: translate(22.4810px, 31.0170px) scale(0.19300, 0.19300); }
++  47.5% { transform: translate(22.4810px, 31.0170px) scale(0.19262, 0.19262); }
++  48.75% { transform: translate(22.4810px, 31.0170px) scale(0.19147, 0.19147); }
++  50% { transform: translate(22.4810px, 31.0170px) scale(0.18955, 0.18955); }
++  51.25% { transform: translate(22.4810px, 31.0170px) scale(0.18686, 0.18686); }
++  52.5% { transform: translate(22.4810px, 31.0170px) scale(0.18339, 0.18339); }
++  53.75% { transform: translate(22.4810px, 31.0170px) scale(0.17917, 0.17917); }
++  55% { transform: translate(22.4810px, 31.0170px) scale(0.17419, 0.17419); }
++  56.25% { transform: translate(22.4810px, 31.0170px) scale(0.16848, 0.16848); }
++  57.5% { transform: translate(22.4810px, 31.0170px) scale(0.16206, 0.16206); }
++  58.75% { transform: translate(22.4810px, 31.0170px) scale(0.15498, 0.15498); }
++  60% { transform: translate(22.4810px, 31.0170px) scale(0.14726, 0.14726); }
++  61.25% { transform: translate(22.4810px, 31.0170px) scale(0.13898, 0.13898); }
++  62.5% { transform: translate(22.4810px, 31.0170px) scale(0.13019, 0.13019); }
++  63.75% { transform: translate(22.4810px, 31.0170px) scale(0.12096, 0.12096); }
++  65% { transform: translate(22.4810px, 31.0170px) scale(0.11139, 0.11139); }
++  66.25% { transform: translate(22.4810px, 31.0170px) scale(0.10155, 0.10155); }
++  67.5% { transform: translate(22.4810px, 31.0170px) scale(0.09157, 0.09157); }
++  68.75% { transform: translate(22.4810px, 31.0170px) scale(0.08155, 0.08155); }
++  70% { transform: translate(22.4810px, 31.0170px) scale(0.07161, 0.07161); }
++  71.25% { transform: translate(22.4810px, 31.0170px) scale(0.06187, 0.06187); }
++  72.5% { transform: translate(22.4810px, 31.0170px) scale(0.05245, 0.05245); }
++  73.75% { transform: translate(22.4810px, 31.0170px) scale(0.04348, 0.04348); }
++  75% { transform: translate(22.4810px, 31.0170px) scale(0.03509, 0.03509); }
++  76.25% { transform: translate(22.4810px, 31.0170px) scale(0.02737, 0.02737); }
++  77.5% { transform: translate(22.4810px, 31.0170px) scale(0.02045, 0.02045); }
++  78.75% { transform: translate(22.4810px, 31.0170px) scale(0.01441, 0.01441); }
++  80% { transform: translate(22.4810px, 31.0170px) scale(0.00934, 0.00934); }
++  81.25% { transform: translate(22.4810px, 31.0170px) scale(0.00531, 0.00531); }
++  82.5% { transform: translate(22.4810px, 31.0170px) scale(0.00238, 0.00238); }
++  83.75% { transform: translate(22.4810px, 31.0170px) scale(0.00060, 0.00060); }
++  85% { transform: translate(22.4810px, 31.0170px) scale(0.00000, 0.00000); }
++  86.25% { transform: translate(22.4810px, 31.0170px) scale(0.00007, 0.00007); }
++  87.5% { transform: translate(22.4810px, 31.0170px) scale(0.00031, 0.00031); }
++  88.75% { transform: translate(22.4810px, 31.0170px) scale(0.00074, 0.00074); }
++  90% { transform: translate(22.4810px, 31.0170px) scale(0.00141, 0.00141); }
++  91.25% { transform: translate(22.4810px, 31.0170px) scale(0.00239, 0.00239); }
++  92.5% { transform: translate(22.4810px, 31.0170px) scale(0.00376, 0.00376); }
++  93.75% { transform: translate(22.4810px, 31.0170px) scale(0.00570, 0.00570); }
++  95% { transform: translate(22.4810px, 31.0170px) scale(0.00852, 0.00852); }
++  96.25% { transform: translate(22.4810px, 31.0170px) scale(0.01295, 0.01295); }
++  97.5% { transform: translate(22.4810px, 31.0170px) scale(0.02223, 0.02223); }
++  98.75% { transform: translate(22.4810px, 31.0170px) scale(0.04325, 0.04325); }
++  100% { transform: translate(22.4810px, 31.0170px) scale(0.04487, 0.04487); }
++}
++@keyframes official-crystal-3 {
++  0% { transform: translate(38.4340px, -14.5150px) scale(0.15375, 0.15375); }
++  1.25% { transform: translate(38.4340px, -14.5150px) scale(0.15450, 0.15450); }
++  2.5% { transform: translate(38.4340px, -14.5150px) scale(0.15525, 0.15525); }
++  3.75% { transform: translate(38.4340px, -14.5150px) scale(0.15600, 0.15600); }
++  5% { transform: translate(38.4340px, -14.5150px) scale(0.15664, 0.15664); }
++  6.25% { transform: translate(38.4340px, -14.5150px) scale(0.15732, 0.15732); }
++  7.5% { transform: translate(38.4340px, -14.5150px) scale(0.15802, 0.15802); }
++  8.75% { transform: translate(38.4340px, -14.5150px) scale(0.15874, 0.15874); }
++  10% { transform: translate(38.4340px, -14.5150px) scale(0.15949, 0.15949); }
++  11.25% { transform: translate(38.4340px, -14.5150px) scale(0.16024, 0.16024); }
++  12.5% { transform: translate(38.4340px, -14.5150px) scale(0.16100, 0.16100); }
++  13.75% { transform: translate(38.4340px, -14.5150px) scale(0.16176, 0.16176); }
++  15% { transform: translate(38.4340px, -14.5150px) scale(0.16251, 0.16251); }
++  16.25% { transform: translate(38.4340px, -14.5150px) scale(0.16326, 0.16326); }
++  17.5% { transform: translate(38.4340px, -14.5150px) scale(0.16398, 0.16398); }
++  18.75% { transform: translate(38.4340px, -14.5150px) scale(0.16468, 0.16468); }
++  20% { transform: translate(38.4340px, -14.5150px) scale(0.16536, 0.16536); }
++  21.25% { transform: translate(38.4340px, -14.5150px) scale(0.16600, 0.16600); }
++  22.5% { transform: translate(38.4340px, -14.5150px) scale(0.16516, 0.16516); }
++  23.75% { transform: translate(38.4340px, -14.5150px) scale(0.16381, 0.16381); }
++  25% { transform: translate(38.4340px, -14.5150px) scale(0.16192, 0.16192); }
++  26.25% { transform: translate(38.4340px, -14.5150px) scale(0.15948, 0.15948); }
++  27.5% { transform: translate(38.4340px, -14.5150px) scale(0.15649, 0.15649); }
++  28.75% { transform: translate(38.4340px, -14.5150px) scale(0.15294, 0.15294); }
++  30% { transform: translate(38.4340px, -14.5150px) scale(0.14881, 0.14881); }
++  31.25% { transform: translate(38.4340px, -14.5150px) scale(0.14412, 0.14412); }
++  32.5% { transform: translate(38.4340px, -14.5150px) scale(0.13886, 0.13886); }
++  33.75% { transform: translate(38.4340px, -14.5150px) scale(0.13304, 0.13304); }
++  35% { transform: translate(38.4340px, -14.5150px) scale(0.12669, 0.12669); }
++  36.25% { transform: translate(38.4340px, -14.5150px) scale(0.11983, 0.11983); }
++  37.5% { transform: translate(38.4340px, -14.5150px) scale(0.11250, 0.11250); }
++  38.75% { transform: translate(38.4340px, -14.5150px) scale(0.10475, 0.10475); }
++  40% { transform: translate(38.4340px, -14.5150px) scale(0.09664, 0.09664); }
++  41.25% { transform: translate(38.4340px, -14.5150px) scale(0.08824, 0.08824); }
++  42.5% { transform: translate(38.4340px, -14.5150px) scale(0.07965, 0.07965); }
++  43.75% { transform: translate(38.4340px, -14.5150px) scale(0.07096, 0.07096); }
++  45% { transform: translate(38.4340px, -14.5150px) scale(0.06230, 0.06230); }
++  46.25% { transform: translate(38.4340px, -14.5150px) scale(0.05377, 0.05377); }
++  47.5% { transform: translate(38.4340px, -14.5150px) scale(0.04550, 0.04550); }
++  48.75% { transform: translate(38.4340px, -14.5150px) scale(0.03762, 0.03762); }
++  50% { transform: translate(38.4340px, -14.5150px) scale(0.03024, 0.03024); }
++  51.25% { transform: translate(38.4340px, -14.5150px) scale(0.02349, 0.02349); }
++  52.5% { transform: translate(38.4340px, -14.5150px) scale(0.01745, 0.01745); }
++  53.75% { transform: translate(38.4340px, -14.5150px) scale(0.01222, 0.01222); }
++  55% { transform: translate(38.4340px, -14.5150px) scale(0.00787, 0.00787); }
++  56.25% { transform: translate(38.4340px, -14.5150px) scale(0.00444, 0.00444); }
++  57.5% { transform: translate(38.4340px, -14.5150px) scale(0.00198, 0.00198); }
++  58.75% { transform: translate(38.4340px, -14.5150px) scale(0.00049, 0.00049); }
++  60% { transform: translate(38.4340px, -14.5150px) scale(0.00000, 0.00000); }
++  61.25% { transform: translate(38.4340px, -14.5150px) scale(0.00024, 0.00024); }
++  62.5% { transform: translate(38.4340px, -14.5150px) scale(0.00097, 0.00097); }
++  63.75% { transform: translate(38.4340px, -14.5150px) scale(0.00220, 0.00220); }
++  65% { transform: translate(38.4340px, -14.5150px) scale(0.00394, 0.00394); }
++  66.25% { transform: translate(38.4340px, -14.5150px) scale(0.00620, 0.00620); }
++  67.5% { transform: translate(38.4340px, -14.5150px) scale(0.00900, 0.00900); }
++  68.75% { transform: translate(38.4340px, -14.5150px) scale(0.01233, 0.01233); }
++  70% { transform: translate(38.4340px, -14.5150px) scale(0.01620, 0.01620); }
++  71.25% { transform: translate(38.4340px, -14.5150px) scale(0.02061, 0.02061); }
++  72.5% { transform: translate(38.4340px, -14.5150px) scale(0.02555, 0.02555); }
++  73.75% { transform: translate(38.4340px, -14.5150px) scale(0.03101, 0.03101); }
++  75% { transform: translate(38.4340px, -14.5150px) scale(0.03697, 0.03697); }
++  76.25% { transform: translate(38.4340px, -14.5150px) scale(0.04339, 0.04339); }
++  77.5% { transform: translate(38.4340px, -14.5150px) scale(0.05024, 0.05024); }
++  78.75% { transform: translate(38.4340px, -14.5150px) scale(0.05747, 0.05747); }
++  80% { transform: translate(38.4340px, -14.5150px) scale(0.06502, 0.06502); }
++  81.25% { transform: translate(38.4340px, -14.5150px) scale(0.07281, 0.07281); }
++  82.5% { transform: translate(38.4340px, -14.5150px) scale(0.08077, 0.08077); }
++  83.75% { transform: translate(38.4340px, -14.5150px) scale(0.08879, 0.08879); }
++  85% { transform: translate(38.4340px, -14.5150px) scale(0.09677, 0.09677); }
++  86.25% { transform: translate(38.4340px, -14.5150px) scale(0.10461, 0.10461); }
++  87.5% { transform: translate(38.4340px, -14.5150px) scale(0.11220, 0.11220); }
++  88.75% { transform: translate(38.4340px, -14.5150px) scale(0.11941, 0.11941); }
++  90% { transform: translate(38.4340px, -14.5150px) scale(0.12615, 0.12615); }
++  91.25% { transform: translate(38.4340px, -14.5150px) scale(0.13232, 0.13232); }
++  92.5% { transform: translate(38.4340px, -14.5150px) scale(0.13783, 0.13783); }
++  93.75% { transform: translate(38.4340px, -14.5150px) scale(0.14260, 0.14260); }
++  95% { transform: translate(38.4340px, -14.5150px) scale(0.14657, 0.14657); }
++  96.25% { transform: translate(38.4340px, -14.5150px) scale(0.14970, 0.14970); }
++  97.5% { transform: translate(38.4340px, -14.5150px) scale(0.15195, 0.15195); }
++  98.75% { transform: translate(38.4340px, -14.5150px) scale(0.15330, 0.15330); }
++  100% { transform: translate(38.4340px, -14.5150px) scale(0.15375, 0.15375); }
++}
++@keyframes official-crystal-4 {
++  0% { transform: translate(-13.6500px, 5.0290px) scale(0.06173, 0.06173); }
++  1.25% { transform: translate(-13.6500px, 5.0290px) scale(0.06553, 0.06553); }
++  2.5% { transform: translate(-13.6500px, 5.0290px) scale(0.06932, 0.06932); }
++  3.75% { transform: translate(-13.6500px, 5.0290px) scale(0.07311, 0.07311); }
++  5% { transform: translate(-13.6500px, 5.0290px) scale(0.07690, 0.07690); }
++  6.25% { transform: translate(-13.6500px, 5.0290px) scale(0.08070, 0.08070); }
++  7.5% { transform: translate(-13.6500px, 5.0290px) scale(0.08449, 0.08449); }
++  8.75% { transform: translate(-13.6500px, 5.0290px) scale(0.08828, 0.08828); }
++  10% { transform: translate(-13.6500px, 5.0290px) scale(0.09207, 0.09207); }
++  11.25% { transform: translate(-13.6500px, 5.0290px) scale(0.09587, 0.09587); }
++  12.5% { transform: translate(-13.6500px, 5.0290px) scale(0.09966, 0.09966); }
++  13.75% { transform: translate(-13.6500px, 5.0290px) scale(0.10345, 0.10345); }
++  15% { transform: translate(-13.6500px, 5.0290px) scale(0.10724, 0.10724); }
++  16.25% { transform: translate(-13.6500px, 5.0290px) scale(0.11104, 0.11104); }
++  17.5% { transform: translate(-13.6500px, 5.0290px) scale(0.11483, 0.11483); }
++  18.75% { transform: translate(-13.6500px, 5.0290px) scale(0.11862, 0.11862); }
++  20% { transform: translate(-13.6500px, 5.0290px) scale(0.12241, 0.12241); }
++  21.25% { transform: translate(-13.6500px, 5.0290px) scale(0.12621, 0.12621); }
++  22.5% { transform: translate(-13.6500px, 5.0290px) scale(0.13000, 0.13000); }
++  23.75% { transform: translate(-13.6500px, 5.0290px) scale(0.13064, 0.13064); }
++  25% { transform: translate(-13.6500px, 5.0290px) scale(0.13132, 0.13132); }
++  26.25% { transform: translate(-13.6500px, 5.0290px) scale(0.13202, 0.13202); }
++  27.5% { transform: translate(-13.6500px, 5.0290px) scale(0.13274, 0.13274); }
++  28.75% { transform: translate(-13.6500px, 5.0290px) scale(0.13349, 0.13349); }
++  30% { transform: translate(-13.6500px, 5.0290px) scale(0.13424, 0.13424); }
++  31.25% { transform: translate(-13.6500px, 5.0290px) scale(0.13500, 0.13500); }
++  32.5% { transform: translate(-13.6500px, 5.0290px) scale(0.13576, 0.13576); }
++  33.75% { transform: translate(-13.6500px, 5.0290px) scale(0.13651, 0.13651); }
++  35% { transform: translate(-13.6500px, 5.0290px) scale(0.13726, 0.13726); }
++  36.25% { transform: translate(-13.6500px, 5.0290px) scale(0.13798, 0.13798); }
++  37.5% { transform: translate(-13.6500px, 5.0290px) scale(0.13868, 0.13868); }
++  38.75% { transform: translate(-13.6500px, 5.0290px) scale(0.13936, 0.13936); }
++  40% { transform: translate(-13.6500px, 5.0290px) scale(0.14000, 0.14000); }
++  41.25% { transform: translate(-13.6500px, 5.0290px) scale(0.13929, 0.13929); }
++  42.5% { transform: translate(-13.6500px, 5.0290px) scale(0.13815, 0.13815); }
++  43.75% { transform: translate(-13.6500px, 5.0290px) scale(0.13656, 0.13656); }
++  45% { transform: translate(-13.6500px, 5.0290px) scale(0.13450, 0.13450); }
++  46.25% { transform: translate(-13.6500px, 5.0290px) scale(0.13198, 0.13198); }
++  47.5% { transform: translate(-13.6500px, 5.0290px) scale(0.12898, 0.12898); }
++  48.75% { transform: translate(-13.6500px, 5.0290px) scale(0.12550, 0.12550); }
++  50% { transform: translate(-13.6500px, 5.0290px) scale(0.12155, 0.12155); }
++  51.25% { transform: translate(-13.6500px, 5.0290px) scale(0.11711, 0.11711); }
++  52.5% { transform: translate(-13.6500px, 5.0290px) scale(0.11221, 0.11221); }
++  53.75% { transform: translate(-13.6500px, 5.0290px) scale(0.10685, 0.10685); }
++  55% { transform: translate(-13.6500px, 5.0290px) scale(0.10106, 0.10106); }
++  56.25% { transform: translate(-13.6500px, 5.0290px) scale(0.09488, 0.09488); }
++  57.5% { transform: translate(-13.6500px, 5.0290px) scale(0.08834, 0.08834); }
++  58.75% { transform: translate(-13.6500px, 5.0290px) scale(0.08150, 0.08150); }
++  60% { transform: translate(-13.6500px, 5.0290px) scale(0.07442, 0.07442); }
++  61.25% { transform: translate(-13.6500px, 5.0290px) scale(0.06717, 0.06717); }
++  62.5% { transform: translate(-13.6500px, 5.0290px) scale(0.05985, 0.05985); }
++  63.75% { transform: translate(-13.6500px, 5.0290px) scale(0.05254, 0.05254); }
++  65% { transform: translate(-13.6500px, 5.0290px) scale(0.04535, 0.04535); }
++  66.25% { transform: translate(-13.6500px, 5.0290px) scale(0.03837, 0.03837); }
++  67.5% { transform: translate(-13.6500px, 5.0290px) scale(0.03173, 0.03173); }
++  68.75% { transform: translate(-13.6500px, 5.0290px) scale(0.02551, 0.02551); }
++  70% { transform: translate(-13.6500px, 5.0290px) scale(0.01981, 0.01981); }
++  71.25% { transform: translate(-13.6500px, 5.0290px) scale(0.01472, 0.01472); }
++  72.5% { transform: translate(-13.6500px, 5.0290px) scale(0.01031, 0.01031); }
++  73.75% { transform: translate(-13.6500px, 5.0290px) scale(0.00664, 0.00664); }
++  75% { transform: translate(-13.6500px, 5.0290px) scale(0.00375, 0.00375); }
++  76.25% { transform: translate(-13.6500px, 5.0290px) scale(0.00167, 0.00167); }
++  77.5% { transform: translate(-13.6500px, 5.0290px) scale(0.00042, 0.00042); }
++  78.75% { transform: translate(-13.6500px, 5.0290px) scale(0.00000, 0.00000); }
++  80% { transform: translate(-13.6500px, 5.0290px) scale(0.00048, 0.00048); }
++  81.25% { transform: translate(-13.6500px, 5.0290px) scale(0.00113, 0.00113); }
++  82.5% { transform: translate(-13.6500px, 5.0290px) scale(0.00196, 0.00196); }
++  83.75% { transform: translate(-13.6500px, 5.0290px) scale(0.00302, 0.00302); }
++  85% { transform: translate(-13.6500px, 5.0290px) scale(0.00434, 0.00434); }
++  86.25% { transform: translate(-13.6500px, 5.0290px) scale(0.00597, 0.00597); }
++  87.5% { transform: translate(-13.6500px, 5.0290px) scale(0.00797, 0.00797); }
++  88.75% { transform: translate(-13.6500px, 5.0290px) scale(0.01045, 0.01045); }
++  90% { transform: translate(-13.6500px, 5.0290px) scale(0.01355, 0.01355); }
++  91.25% { transform: translate(-13.6500px, 5.0290px) scale(0.01748, 0.01748); }
++  92.5% { transform: translate(-13.6500px, 5.0290px) scale(0.02263, 0.02263); }
++  93.75% { transform: translate(-13.6500px, 5.0290px) scale(0.02963, 0.02963); }
++  95% { transform: translate(-13.6500px, 5.0290px) scale(0.03949, 0.03949); }
++  96.25% { transform: translate(-13.6500px, 5.0290px) scale(0.05096, 0.05096); }
++  97.5% { transform: translate(-13.6500px, 5.0290px) scale(0.05814, 0.05814); }
++  98.75% { transform: translate(-13.6500px, 5.0290px) scale(0.06103, 0.06103); }
++  100% { transform: translate(-13.6500px, 5.0290px) scale(0.06173, 0.06173); }
++}
++@keyframes official-crystal-5 {
++  0% { transform: translate(-40.7540px, 6.2371px) scale(0.01500, 0.06817); }
++  1.25% { transform: translate(-40.7540px, 5.7772px) scale(0.01500, 0.06900); }
++  2.5% { transform: translate(-40.7540px, 5.3174px) scale(0.01500, 0.06983); }
++  3.75% { transform: translate(-40.7540px, 4.8575px) scale(0.01500, 0.07067); }
++  5% { transform: translate(-40.7540px, 4.3977px) scale(0.01500, 0.07150); }
++  6.25% { transform: translate(-40.7540px, 3.9378px) scale(0.01500, 0.07233); }
++  7.5% { transform: translate(-40.7540px, 3.4780px) scale(0.01500, 0.07317); }
++  8.75% { transform: translate(-40.7540px, 3.0181px) scale(0.01500, 0.07400); }
++  10% { transform: translate(-40.7540px, 2.5583px) scale(0.01500, 0.07483); }
++  11.25% { transform: translate(-40.7540px, 2.0984px) scale(0.01500, 0.07567); }
++  12.5% { transform: translate(-40.7540px, 1.6386px) scale(0.01500, 0.07650); }
++  13.75% { transform: translate(-40.7540px, 1.1787px) scale(0.01500, 0.07733); }
++  15% { transform: translate(-40.7540px, 0.7189px) scale(0.01500, 0.07817); }
++  16.25% { transform: translate(-40.7540px, 0.2591px) scale(0.01500, 0.07900); }
++  17.5% { transform: translate(-40.7540px, -0.2008px) scale(0.01444, 0.07607); }
++  18.75% { transform: translate(-40.7540px, -0.6606px) scale(0.01389, 0.07315); }
++  20% { transform: translate(-40.7540px, -1.1205px) scale(0.01333, 0.07022); }
++  21.25% { transform: translate(-40.7540px, -1.5803px) scale(0.01278, 0.06730); }
++  22.5% { transform: translate(-40.7540px, -2.0402px) scale(0.01222, 0.06437); }
++  23.75% { transform: translate(-40.7540px, -2.5000px) scale(0.01167, 0.06144); }
++  25% { transform: translate(-40.7540px, -2.9599px) scale(0.01111, 0.05852); }
++  26.25% { transform: translate(-40.7540px, -3.4197px) scale(0.01056, 0.05559); }
++  27.5% { transform: translate(-40.7540px, -3.8796px) scale(0.01000, 0.05267); }
++  28.75% { transform: translate(-40.7540px, -4.3394px) scale(0.00944, 0.04974); }
++  30% { transform: translate(-40.7540px, -4.7993px) scale(0.00889, 0.04681); }
++  31.25% { transform: translate(-40.7540px, -5.2591px) scale(0.00833, 0.04389); }
++  32.5% { transform: translate(-40.7540px, -5.7190px) scale(0.00778, 0.04096); }
++  33.75% { transform: translate(-40.7540px, -6.1788px) scale(0.00722, 0.03804); }
++  35% { transform: translate(-40.7540px, -6.6387px) scale(0.00667, 0.03511); }
++  36.25% { transform: translate(-40.7540px, -7.0985px) scale(0.00611, 0.03219); }
++  37.5% { transform: translate(-40.7540px, -7.5584px) scale(0.00556, 0.02926); }
++  38.75% { transform: translate(-40.7540px, -8.0182px) scale(0.00500, 0.02633); }
++  40% { transform: translate(-40.7540px, -8.4781px) scale(0.00444, 0.02341); }
++  41.25% { transform: translate(-40.7540px, -8.9379px) scale(0.00389, 0.02048); }
++  42.5% { transform: translate(-40.7540px, -9.3978px) scale(0.00333, 0.01756); }
++  43.75% { transform: translate(-40.7540px, -9.8576px) scale(0.00278, 0.01463); }
++  45% { transform: translate(-40.7540px, -10.3175px) scale(0.00222, 0.01170); }
++  46.25% { transform: translate(-40.7540px, -10.7773px) scale(0.00167, 0.00878); }
++  47.5% { transform: translate(-40.7540px, -11.2372px) scale(0.00111, 0.00585); }
++  48.75% { transform: translate(-40.7540px, -11.6970px) scale(0.00056, 0.00293); }
++  50% { transform: translate(-40.7540px, 20.3170px) scale(0.00000, 0.00000); }
++  51.25% { transform: translate(-40.7540px, 19.9650px) scale(0.00065, 0.00235); }
++  52.5% { transform: translate(-40.7540px, 19.6130px) scale(0.00130, 0.00470); }
++  53.75% { transform: translate(-40.7540px, 19.2610px) scale(0.00196, 0.00704); }
++  55% { transform: translate(-40.7540px, 18.9090px) scale(0.00261, 0.00939); }
++  56.25% { transform: translate(-40.7540px, 18.5570px) scale(0.00326, 0.01174); }
++  57.5% { transform: translate(-40.7540px, 18.2050px) scale(0.00391, 0.01409); }
++  58.75% { transform: translate(-40.7540px, 17.8530px) scale(0.00457, 0.01643); }
++  60% { transform: translate(-40.7540px, 17.5010px) scale(0.00522, 0.01878); }
++  61.25% { transform: translate(-40.7540px, 17.1490px) scale(0.00587, 0.02113); }
++  62.5% { transform: translate(-40.7540px, 16.7970px) scale(0.00652, 0.02348); }
++  63.75% { transform: translate(-40.7540px, 16.4450px) scale(0.00717, 0.02583); }
++  65% { transform: translate(-40.7540px, 16.0930px) scale(0.00783, 0.02817); }
++  66.25% { transform: translate(-40.7540px, 15.7410px) scale(0.00848, 0.03052); }
++  67.5% { transform: translate(-40.7540px, 15.3890px) scale(0.00913, 0.03287); }
++  68.75% { transform: translate(-40.7540px, 15.0370px) scale(0.00978, 0.03522); }
++  70% { transform: translate(-40.7540px, 14.6850px) scale(0.01043, 0.03757); }
++  71.25% { transform: translate(-40.7540px, 14.3330px) scale(0.01109, 0.03991); }
++  72.5% { transform: translate(-40.7540px, 13.9810px) scale(0.01174, 0.04226); }
++  73.75% { transform: translate(-40.7540px, 13.6290px) scale(0.01239, 0.04461); }
++  75% { transform: translate(-40.7540px, 13.2770px) scale(0.01304, 0.04696); }
++  76.25% { transform: translate(-40.7540px, 12.9250px) scale(0.01370, 0.04930); }
++  77.5% { transform: translate(-40.7540px, 12.5730px) scale(0.01435, 0.05165); }
++  78.75% { transform: translate(-40.7540px, 12.2210px) scale(0.01500, 0.05400); }
++  80% { transform: translate(-40.7540px, 11.8690px) scale(0.01500, 0.05483); }
++  81.25% { transform: translate(-40.7540px, 11.5170px) scale(0.01500, 0.05567); }
++  82.5% { transform: translate(-40.7540px, 11.1651px) scale(0.01500, 0.05650); }
++  83.75% { transform: translate(-40.7540px, 10.8131px) scale(0.01500, 0.05733); }
++  85% { transform: translate(-40.7540px, 10.4611px) scale(0.01500, 0.05817); }
++  86.25% { transform: translate(-40.7540px, 10.1091px) scale(0.01500, 0.05900); }
++  87.5% { transform: translate(-40.7540px, 9.7571px) scale(0.01500, 0.05983); }
++  88.75% { transform: translate(-40.7540px, 9.4051px) scale(0.01500, 0.06067); }
++  90% { transform: translate(-40.7540px, 9.0531px) scale(0.01500, 0.06150); }
++  91.25% { transform: translate(-40.7540px, 8.7011px) scale(0.01500, 0.06233); }
++  92.5% { transform: translate(-40.7540px, 8.3491px) scale(0.01500, 0.06317); }
++  93.75% { transform: translate(-40.7540px, 7.9971px) scale(0.01500, 0.06400); }
++  95% { transform: translate(-40.7540px, 7.6451px) scale(0.01500, 0.06483); }
++  96.25% { transform: translate(-40.7540px, 7.2931px) scale(0.01500, 0.06567); }
++  97.5% { transform: translate(-40.7540px, 6.9411px) scale(0.01500, 0.06650); }
++  98.75% { transform: translate(-40.7540px, 6.5891px) scale(0.01500, 0.06733); }
++  100% { transform: translate(-40.7540px, 6.2371px) scale(0.01500, 0.06817); }
++}
++@keyframes official-crystal-6 {
++  0% { transform: translate(-22.4040px, 35.0053px) scale(0.01252, 0.03757); }
++  1.25% { transform: translate(-22.4040px, 34.5448px) scale(0.01330, 0.03991); }
++  2.5% { transform: translate(-22.4040px, 34.0843px) scale(0.01409, 0.04226); }
++  3.75% { transform: translate(-22.4040px, 33.6239px) scale(0.01487, 0.04461); }
++  5% { transform: translate(-22.4040px, 33.1634px) scale(0.01565, 0.04696); }
++  6.25% { transform: translate(-22.4040px, 32.7029px) scale(0.01643, 0.04930); }
++  7.5% { transform: translate(-22.4040px, 32.2424px) scale(0.01722, 0.05165); }
++  8.75% { transform: translate(-22.4040px, 31.7819px) scale(0.01800, 0.05400); }
++  10% { transform: translate(-22.4040px, 31.3215px) scale(0.01797, 0.05400); }
++  11.25% { transform: translate(-22.4040px, 30.8610px) scale(0.01793, 0.05400); }
++  12.5% { transform: translate(-22.4040px, 30.4005px) scale(0.01790, 0.05400); }
++  13.75% { transform: translate(-22.4040px, 29.9400px) scale(0.01787, 0.05400); }
++  15% { transform: translate(-22.4040px, 29.4795px) scale(0.01783, 0.05400); }
++  16.25% { transform: translate(-22.4040px, 29.0191px) scale(0.01780, 0.05400); }
++  17.5% { transform: translate(-22.4040px, 28.5586px) scale(0.01777, 0.05400); }
++  18.75% { transform: translate(-22.4040px, 28.0981px) scale(0.01773, 0.05400); }
++  20% { transform: translate(-22.4040px, 27.6376px) scale(0.01770, 0.05400); }
++  21.25% { transform: translate(-22.4040px, 27.1771px) scale(0.01767, 0.05400); }
++  22.5% { transform: translate(-22.4040px, 26.7166px) scale(0.01763, 0.05400); }
++  23.75% { transform: translate(-22.4040px, 26.2562px) scale(0.01760, 0.05400); }
++  25% { transform: translate(-22.4040px, 25.7957px) scale(0.01757, 0.05400); }
++  26.25% { transform: translate(-22.4040px, 25.3352px) scale(0.01753, 0.05400); }
++  27.5% { transform: translate(-22.4040px, 24.8747px) scale(0.01750, 0.05400); }
++  28.75% { transform: translate(-22.4040px, 24.4142px) scale(0.01747, 0.05400); }
++  30% { transform: translate(-22.4040px, 23.9538px) scale(0.01743, 0.05400); }
++  31.25% { transform: translate(-22.4040px, 23.4933px) scale(0.01740, 0.05400); }
++  32.5% { transform: translate(-22.4040px, 23.0328px) scale(0.01737, 0.05400); }
++  33.75% { transform: translate(-22.4040px, 22.5723px) scale(0.01733, 0.05400); }
++  35% { transform: translate(-22.4040px, 22.1118px) scale(0.01730, 0.05400); }
++  36.25% { transform: translate(-22.4040px, 21.6514px) scale(0.01727, 0.05400); }
++  37.5% { transform: translate(-22.4040px, 21.1909px) scale(0.01723, 0.05400); }
++  38.75% { transform: translate(-22.4040px, 20.7304px) scale(0.01720, 0.05400); }
++  40% { transform: translate(-22.4040px, 20.2699px) scale(0.01717, 0.05400); }
++  41.25% { transform: translate(-22.4040px, 19.8094px) scale(0.01713, 0.05400); }
++  42.5% { transform: translate(-22.4040px, 19.3489px) scale(0.01710, 0.05400); }
++  43.75% { transform: translate(-22.4040px, 18.8885px) scale(0.01707, 0.05400); }
++  45% { transform: translate(-22.4040px, 18.4280px) scale(0.01703, 0.05400); }
++  46.25% { transform: translate(-22.4040px, 17.9675px) scale(0.01700, 0.05400); }
++  47.5% { transform: translate(-22.4040px, 17.5070px) scale(0.01637, 0.05200); }
++  48.75% { transform: translate(-22.4040px, 17.0465px) scale(0.01574, 0.05000); }
++  50% { transform: translate(-22.4040px, 16.5861px) scale(0.01511, 0.04800); }
++  51.25% { transform: translate(-22.4040px, 16.1256px) scale(0.01448, 0.04600); }
++  52.5% { transform: translate(-22.4040px, 15.6651px) scale(0.01385, 0.04400); }
++  53.75% { transform: translate(-22.4040px, 15.2046px) scale(0.01322, 0.04200); }
++  55% { transform: translate(-22.4040px, 14.7441px) scale(0.01259, 0.04000); }
++  56.25% { transform: translate(-22.4040px, 14.2837px) scale(0.01196, 0.03800); }
++  57.5% { transform: translate(-22.4040px, 13.8232px) scale(0.01133, 0.03600); }
++  58.75% { transform: translate(-22.4040px, 13.3627px) scale(0.01070, 0.03400); }
++  60% { transform: translate(-22.4040px, 12.9022px) scale(0.01007, 0.03200); }
++  61.25% { transform: translate(-22.4040px, 12.4417px) scale(0.00944, 0.03000); }
++  62.5% { transform: translate(-22.4040px, 11.9813px) scale(0.00881, 0.02800); }
++  63.75% { transform: translate(-22.4040px, 11.5208px) scale(0.00819, 0.02600); }
++  65% { transform: translate(-22.4040px, 11.0603px) scale(0.00756, 0.02400); }
++  66.25% { transform: translate(-22.4040px, 10.5998px) scale(0.00693, 0.02200); }
++  67.5% { transform: translate(-22.4040px, 10.1393px) scale(0.00630, 0.02000); }
++  68.75% { transform: translate(-22.4040px, 9.6788px) scale(0.00567, 0.01800); }
++  70% { transform: translate(-22.4040px, 9.2184px) scale(0.00504, 0.01600); }
++  71.25% { transform: translate(-22.4040px, 8.7579px) scale(0.00441, 0.01400); }
++  72.5% { transform: translate(-22.4040px, 8.2974px) scale(0.00378, 0.01200); }
++  73.75% { transform: translate(-22.4040px, 7.8369px) scale(0.00315, 0.01000); }
++  75% { transform: translate(-22.4040px, 7.3764px) scale(0.00252, 0.00800); }
++  76.25% { transform: translate(-22.4040px, 6.9160px) scale(0.00189, 0.00600); }
++  77.5% { transform: translate(-22.4040px, 6.4555px) scale(0.00126, 0.00400); }
++  78.75% { transform: translate(-22.4040px, 5.9951px) scale(0.00063, 0.00200); }
++  80% { transform: translate(-22.4040px, 42.3729px) scale(0.00000, 0.00000); }
++  81.25% { transform: translate(-22.4040px, 41.9125px) scale(0.00078, 0.00235); }
++  82.5% { transform: translate(-22.4040px, 41.4520px) scale(0.00157, 0.00470); }
++  83.75% { transform: translate(-22.4040px, 40.9916px) scale(0.00235, 0.00704); }
++  85% { transform: translate(-22.4040px, 40.5311px) scale(0.00313, 0.00939); }
++  86.25% { transform: translate(-22.4040px, 40.0706px) scale(0.00391, 0.01174); }
++  87.5% { transform: translate(-22.4040px, 39.6101px) scale(0.00470, 0.01409); }
++  88.75% { transform: translate(-22.4040px, 39.1496px) scale(0.00548, 0.01643); }
++  90% { transform: translate(-22.4040px, 38.6892px) scale(0.00626, 0.01878); }
++  91.25% { transform: translate(-22.4040px, 38.2287px) scale(0.00704, 0.02113); }
++  92.5% { transform: translate(-22.4040px, 37.7682px) scale(0.00783, 0.02348); }
++  93.75% { transform: translate(-22.4040px, 37.3077px) scale(0.00861, 0.02583); }
++  95% { transform: translate(-22.4040px, 36.8472px) scale(0.00939, 0.02817); }
++  96.25% { transform: translate(-22.4040px, 36.3867px) scale(0.01017, 0.03052); }
++  97.5% { transform: translate(-22.4040px, 35.9263px) scale(0.01096, 0.03287); }
++  98.75% { transform: translate(-22.4040px, 35.4658px) scale(0.01174, 0.03522); }
++  100% { transform: translate(-22.4040px, 35.0053px) scale(0.01252, 0.03757); }
++}
++@keyframes official-crystal-7 {
++  0% { transform: translate(43.9570px, 20.1258px) scale(0.00478, 0.01174); }
++  1.25% { transform: translate(43.9570px, 19.7122px) scale(0.00574, 0.01409); }
++  2.5% { transform: translate(43.9570px, 19.2986px) scale(0.00670, 0.01643); }
++  3.75% { transform: translate(43.9570px, 18.8849px) scale(0.00765, 0.01878); }
++  5% { transform: translate(43.9570px, 18.4713px) scale(0.00861, 0.02113); }
++  6.25% { transform: translate(43.9570px, 18.0577px) scale(0.00957, 0.02348); }
++  7.5% { transform: translate(43.9570px, 17.6440px) scale(0.01052, 0.02583); }
++  8.75% { transform: translate(43.9570px, 17.2304px) scale(0.01148, 0.02817); }
++  10% { transform: translate(43.9570px, 16.8168px) scale(0.01243, 0.03052); }
++  11.25% { transform: translate(43.9570px, 16.4031px) scale(0.01339, 0.03287); }
++  12.5% { transform: translate(43.9570px, 15.9895px) scale(0.01435, 0.03522); }
++  13.75% { transform: translate(43.9570px, 15.5759px) scale(0.01530, 0.03757); }
++  15% { transform: translate(43.9570px, 15.1622px) scale(0.01626, 0.03991); }
++  16.25% { transform: translate(43.9570px, 14.7486px) scale(0.01722, 0.04226); }
++  17.5% { transform: translate(43.9570px, 14.3350px) scale(0.01817, 0.04461); }
++  18.75% { transform: translate(43.9570px, 13.9213px) scale(0.01913, 0.04696); }
++  20% { transform: translate(43.9570px, 13.5077px) scale(0.02009, 0.04930); }
++  21.25% { transform: translate(43.9570px, 13.0941px) scale(0.02104, 0.05165); }
++  22.5% { transform: translate(43.9570px, 12.6804px) scale(0.02200, 0.05400); }
++  23.75% { transform: translate(43.9570px, 12.2668px) scale(0.02200, 0.05400); }
++  25% { transform: translate(43.9570px, 11.8532px) scale(0.02200, 0.05400); }
++  26.25% { transform: translate(43.9570px, 11.4395px) scale(0.02200, 0.05400); }
++  27.5% { transform: translate(43.9570px, 11.0259px) scale(0.02200, 0.05400); }
++  28.75% { transform: translate(43.9570px, 10.6123px) scale(0.02200, 0.05400); }
++  30% { transform: translate(43.9570px, 10.1986px) scale(0.02200, 0.05400); }
++  31.25% { transform: translate(43.9570px, 9.7850px) scale(0.02200, 0.05400); }
++  32.5% { transform: translate(43.9570px, 9.3714px) scale(0.02200, 0.05400); }
++  33.75% { transform: translate(43.9570px, 8.9577px) scale(0.02200, 0.05400); }
++  35% { transform: translate(43.9570px, 8.5441px) scale(0.02200, 0.05400); }
++  36.25% { transform: translate(43.9570px, 8.1305px) scale(0.02200, 0.05400); }
++  37.5% { transform: translate(43.9570px, 7.7168px) scale(0.02200, 0.05400); }
++  38.75% { transform: translate(43.9570px, 7.3032px) scale(0.02200, 0.05400); }
++  40% { transform: translate(43.9570px, 6.8896px) scale(0.02200, 0.05400); }
++  41.25% { transform: translate(43.9570px, 6.4760px) scale(0.02200, 0.05400); }
++  42.5% { transform: translate(43.9570px, 6.0623px) scale(0.02200, 0.05400); }
++  43.75% { transform: translate(43.9570px, 5.6487px) scale(0.02200, 0.05400); }
++  45% { transform: translate(43.9570px, 5.2351px) scale(0.02200, 0.05400); }
++  46.25% { transform: translate(43.9570px, 4.8214px) scale(0.02200, 0.05400); }
++  47.5% { transform: translate(43.9570px, 4.4078px) scale(0.02200, 0.05400); }
++  48.75% { transform: translate(43.9570px, 3.9942px) scale(0.02200, 0.05400); }
++  50% { transform: translate(43.9570px, 3.5805px) scale(0.02200, 0.05400); }
++  51.25% { transform: translate(43.9570px, 3.1669px) scale(0.02200, 0.05400); }
++  52.5% { transform: translate(43.9570px, 2.7533px) scale(0.02200, 0.05400); }
++  53.75% { transform: translate(43.9570px, 2.3396px) scale(0.02200, 0.05400); }
++  55% { transform: translate(43.9570px, 1.9260px) scale(0.02200, 0.05400); }
++  56.25% { transform: translate(43.9570px, 1.5124px) scale(0.02200, 0.05400); }
++  57.5% { transform: translate(43.9570px, 1.0987px) scale(0.02200, 0.05400); }
++  58.75% { transform: translate(43.9570px, 0.6851px) scale(0.02200, 0.05400); }
++  60% { transform: translate(43.9570px, 0.2715px) scale(0.02200, 0.05400); }
++  61.25% { transform: translate(43.9570px, -0.1422px) scale(0.02119, 0.05200); }
++  62.5% { transform: translate(43.9570px, -0.5558px) scale(0.02037, 0.05000); }
++  63.75% { transform: translate(43.9570px, -0.9694px) scale(0.01956, 0.04800); }
++  65% { transform: translate(43.9570px, -1.3831px) scale(0.01874, 0.04600); }
++  66.25% { transform: translate(43.9570px, -1.7967px) scale(0.01793, 0.04400); }
++  67.5% { transform: translate(43.9570px, -2.2103px) scale(0.01711, 0.04200); }
++  68.75% { transform: translate(43.9570px, -2.6240px) scale(0.01630, 0.04000); }
++  70% { transform: translate(43.9570px, -3.0376px) scale(0.01548, 0.03800); }
++  71.25% { transform: translate(43.9570px, -3.4512px) scale(0.01467, 0.03600); }
++  72.5% { transform: translate(43.9570px, -3.8649px) scale(0.01385, 0.03400); }
++  73.75% { transform: translate(43.9570px, -4.2785px) scale(0.01304, 0.03200); }
++  75% { transform: translate(43.9570px, -4.6921px) scale(0.01222, 0.03000); }
++  76.25% { transform: translate(43.9570px, -5.1058px) scale(0.01141, 0.02800); }
++  77.5% { transform: translate(43.9570px, -5.5194px) scale(0.01059, 0.02600); }
++  78.75% { transform: translate(43.9570px, -5.9330px) scale(0.00978, 0.02400); }
++  80% { transform: translate(43.9570px, -6.3467px) scale(0.00896, 0.02200); }
++  81.25% { transform: translate(43.9570px, -6.7603px) scale(0.00815, 0.02000); }
++  82.5% { transform: translate(43.9570px, -7.1739px) scale(0.00733, 0.01800); }
++  83.75% { transform: translate(43.9570px, -7.5876px) scale(0.00652, 0.01600); }
++  85% { transform: translate(43.9570px, -8.0012px) scale(0.00570, 0.01400); }
++  86.25% { transform: translate(43.9570px, -8.4148px) scale(0.00489, 0.01200); }
++  87.5% { transform: translate(43.9570px, -8.8285px) scale(0.00407, 0.01000); }
++  88.75% { transform: translate(43.9570px, -9.2421px) scale(0.00326, 0.00800); }
++  90% { transform: translate(43.9570px, -9.6557px) scale(0.00244, 0.00600); }
++  91.25% { transform: translate(43.9570px, -10.0694px) scale(0.00163, 0.00400); }
++  92.5% { transform: translate(43.9570px, -10.4830px) scale(0.00081, 0.00200); }
++  93.75% { transform: translate(43.9570px, 22.1940px) scale(0.00000, 0.00000); }
++  95% { transform: translate(43.9570px, 21.7804px) scale(0.00096, 0.00235); }
++  96.25% { transform: translate(43.9570px, 21.3667px) scale(0.00191, 0.00470); }
++  97.5% { transform: translate(43.9570px, 20.9531px) scale(0.00287, 0.00704); }
++  98.75% { transform: translate(43.9570px, 20.5395px) scale(0.00383, 0.00939); }
++  100% { transform: translate(43.9570px, 20.1258px) scale(0.00478, 0.01174); }
++}
++@keyframes official-crystal-8 {
++  0% { transform: translate(5.8020px, -3.7138px) scale(0.01973, 0.06787); }
++  1.25% { transform: translate(5.8020px, -4.1709px) scale(0.01951, 0.06893); }
++  2.5% { transform: translate(5.8020px, -4.6279px) scale(0.01929, 0.07000); }
++  3.75% { transform: translate(5.8020px, -5.0850px) scale(0.01907, 0.07107); }
++  5% { transform: translate(5.8020px, -5.5420px) scale(0.01885, 0.07213); }
++  6.25% { transform: translate(5.8020px, -5.9991px) scale(0.01864, 0.07320); }
++  7.5% { transform: translate(5.8020px, -6.4561px) scale(0.01842, 0.07427); }
++  8.75% { transform: translate(5.8020px, -6.9132px) scale(0.01820, 0.07533); }
++  10% { transform: translate(5.8020px, -7.3702px) scale(0.01798, 0.07640); }
++  11.25% { transform: translate(5.8020px, -7.8273px) scale(0.01776, 0.07747); }
++  12.5% { transform: translate(5.8020px, -8.2843px) scale(0.01754, 0.07853); }
++  13.75% { transform: translate(5.8020px, -8.7414px) scale(0.01732, 0.07960); }
++  15% { transform: translate(5.8020px, -9.1984px) scale(0.01710, 0.08067); }
++  16.25% { transform: translate(5.8020px, -9.6555px) scale(0.01688, 0.08173); }
++  17.5% { transform: translate(5.8020px, -10.1125px) scale(0.01666, 0.08280); }
++  18.75% { transform: translate(5.8020px, -10.5696px) scale(0.01644, 0.08387); }
++  20% { transform: translate(5.8020px, -11.0266px) scale(0.01622, 0.08493); }
++  21.25% { transform: translate(5.8020px, -11.4837px) scale(0.01600, 0.08600); }
++  22.5% { transform: translate(5.8020px, -11.9407px) scale(0.01541, 0.08281); }
++  23.75% { transform: translate(5.8020px, -12.3978px) scale(0.01481, 0.07963); }
++  25% { transform: translate(5.8020px, -12.8548px) scale(0.01422, 0.07644); }
++  26.25% { transform: translate(5.8020px, -13.3119px) scale(0.01363, 0.07326); }
++  27.5% { transform: translate(5.8020px, -13.7689px) scale(0.01304, 0.07007); }
++  28.75% { transform: translate(5.8020px, -14.2260px) scale(0.01244, 0.06689); }
++  30% { transform: translate(5.8020px, -14.6830px) scale(0.01185, 0.06370); }
++  31.25% { transform: translate(5.8020px, -15.1401px) scale(0.01126, 0.06052); }
++  32.5% { transform: translate(5.8020px, -15.5971px) scale(0.01067, 0.05733); }
++  33.75% { transform: translate(5.8020px, -16.0542px) scale(0.01007, 0.05415); }
++  35% { transform: translate(5.8020px, -16.5112px) scale(0.00948, 0.05096); }
++  36.25% { transform: translate(5.8020px, -16.9683px) scale(0.00889, 0.04778); }
++  37.5% { transform: translate(5.8020px, -17.4253px) scale(0.00830, 0.04459); }
++  38.75% { transform: translate(5.8020px, -17.8824px) scale(0.00770, 0.04141); }
++  40% { transform: translate(5.8020px, -18.3394px) scale(0.00711, 0.03822); }
++  41.25% { transform: translate(5.8020px, -18.7965px) scale(0.00652, 0.03504); }
++  42.5% { transform: translate(5.8020px, -19.2535px) scale(0.00593, 0.03185); }
++  43.75% { transform: translate(5.8020px, -19.7106px) scale(0.00533, 0.02867); }
++  45% { transform: translate(5.8020px, -20.1676px) scale(0.00474, 0.02548); }
++  46.25% { transform: translate(5.8020px, -20.6247px) scale(0.00415, 0.02230); }
++  47.5% { transform: translate(5.8020px, -21.0817px) scale(0.00356, 0.01911); }
++  48.75% { transform: translate(5.8020px, -21.5388px) scale(0.00296, 0.01593); }
++  50% { transform: translate(5.8020px, -21.9959px) scale(0.00237, 0.01274); }
++  51.25% { transform: translate(5.8020px, -22.4529px) scale(0.00178, 0.00956); }
++  52.5% { transform: translate(5.8020px, -22.9100px) scale(0.00119, 0.00637); }
++  53.75% { transform: translate(5.8020px, -23.3669px) scale(0.00059, 0.00319); }
++  55% { transform: translate(5.8020px, 12.7400px) scale(0.00000, 0.00000); }
++  56.25% { transform: translate(5.8020px, 12.2829px) scale(0.00078, 0.00235); }
++  57.5% { transform: translate(5.8020px, 11.8259px) scale(0.00157, 0.00470); }
++  58.75% { transform: translate(5.8020px, 11.3688px) scale(0.00235, 0.00704); }
++  60% { transform: translate(5.8020px, 10.9118px) scale(0.00313, 0.00939); }
++  61.25% { transform: translate(5.8020px, 10.4547px) scale(0.00391, 0.01174); }
++  62.5% { transform: translate(5.8020px, 9.9977px) scale(0.00470, 0.01409); }
++  63.75% { transform: translate(5.8020px, 9.5406px) scale(0.00548, 0.01643); }
++  65% { transform: translate(5.8020px, 9.0836px) scale(0.00626, 0.01878); }
++  66.25% { transform: translate(5.8020px, 8.6265px) scale(0.00704, 0.02113); }
++  67.5% { transform: translate(5.8020px, 8.1695px) scale(0.00783, 0.02348); }
++  68.75% { transform: translate(5.8020px, 7.7124px) scale(0.00861, 0.02583); }
++  70% { transform: translate(5.8020px, 7.2554px) scale(0.00939, 0.02817); }
++  71.25% { transform: translate(5.8020px, 6.7983px) scale(0.01017, 0.03052); }
++  72.5% { transform: translate(5.8020px, 6.3413px) scale(0.01096, 0.03287); }
++  73.75% { transform: translate(5.8020px, 5.8842px) scale(0.01174, 0.03522); }
++  75% { transform: translate(5.8020px, 5.4272px) scale(0.01252, 0.03757); }
++  76.25% { transform: translate(5.8020px, 4.9701px) scale(0.01330, 0.03991); }
++  77.5% { transform: translate(5.8020px, 4.5131px) scale(0.01409, 0.04226); }
++  78.75% { transform: translate(5.8020px, 4.0560px) scale(0.01487, 0.04461); }
++  80% { transform: translate(5.8020px, 3.5990px) scale(0.01565, 0.04696); }
++  81.25% { transform: translate(5.8020px, 3.1419px) scale(0.01643, 0.04930); }
++  82.5% { transform: translate(5.8020px, 2.6849px) scale(0.01722, 0.05165); }
++  83.75% { transform: translate(5.8020px, 2.2278px) scale(0.01800, 0.05400); }
++  85% { transform: translate(5.8020px, 1.7708px) scale(0.01813, 0.05507); }
++  86.25% { transform: translate(5.8020px, 1.3137px) scale(0.01827, 0.05613); }
++  87.5% { transform: translate(5.8020px, 0.8567px) scale(0.01840, 0.05720); }
++  88.75% { transform: translate(5.8020px, 0.3996px) scale(0.01853, 0.05827); }
++  90% { transform: translate(5.8020px, -0.0574px) scale(0.01867, 0.05933); }
++  91.25% { transform: translate(5.8020px, -0.5145px) scale(0.01880, 0.06040); }
++  92.5% { transform: translate(5.8020px, -0.9715px) scale(0.01893, 0.06147); }
++  93.75% { transform: translate(5.8020px, -1.4286px) scale(0.01907, 0.06253); }
++  95% { transform: translate(5.8020px, -1.8856px) scale(0.01920, 0.06360); }
++  96.25% { transform: translate(5.8020px, -2.3427px) scale(0.01933, 0.06467); }
++  97.5% { transform: translate(5.8020px, -2.7997px) scale(0.01947, 0.06573); }
++  98.75% { transform: translate(5.8020px, -3.2568px) scale(0.01960, 0.06680); }
++  100% { transform: translate(5.8020px, -3.7138px) scale(0.01973, 0.06787); }
++}
+-- 
+2.56.0
+

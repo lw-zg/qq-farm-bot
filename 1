@@ -1,0 +1,385 @@
+From 151f60c4d51b59156e17f162c6aa880e6b3ad147 Mon Sep 17 00:00:00 2001
+From: lw-zg <lw-zg@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 13:24:50 +0800
+Subject: [PATCH 1/9] feat: add per-activity auto-execution switches (nas
+ patch)
+
+Reintroduce activity automation switches (removed in the TS rewrite vs
+BuildAtDawn upstream) behind new automation keys, default off:
+
+- activity_battle_pass_claim: claim stellar/battle pass rewards
+- activity_charity_claim: charity red flower seeds/daily gift/progress
+- activity_charity_donate: donate all love balance
+- activity_qingmei_claim: claim daily qingmei seeds
+- activity_qingmei_brew: auto brew/continue/settle qingmei wine
+- activity_milk_tea_fund_claim: claim milk tea growth fund rewards
+
+New service core/src/services/activity-auto.ts runs every 30 minutes via
+the worker scheduler (exclusive automation lock), treats unavailable /
+already-claimed / not-open errors as quiet no-ops, caps real error
+retries at 3/day, and reports successes via push_notify. Web panel gains
+an activity automation section in AutomationSettingsForm.
+---
+ core/src/core/worker.ts                       |  22 +++
+ core/src/models/store/shared-state.ts         |   6 +
+ core/src/services/activity-auto.ts            | 186 ++++++++++++++++++
+ core/src/types/config.ts                      |  12 ++
+ .../settings/AutomationSettingsForm.vue       |  37 ++++
+ web/src/stores/setting.ts                     |   6 +
+ 6 files changed, 269 insertions(+)
+ create mode 100644 core/src/services/activity-auto.ts
+
+diff --git a/core/src/core/worker.ts b/core/src/core/worker.ts
+index 73c32aa..798dc8f 100644
+--- a/core/src/core/worker.ts
++++ b/core/src/core/worker.ts
+@@ -20,6 +20,7 @@ const { runExclusiveAutomationTask } = require('../services/automation-lock');
+ const { createScheduler, getSchedulerRegistrySnapshot } = require('../services/scheduler');
+ const { checkDailyShareStatus, getShareDailyState } = require('../services/share');
+ const { refreshActivityWindows } = require('../services/activity-windows');
++const { runActivityAutoTasks, isActivityAutoEnabled, ACTIVITY_AUTO_CHECK_INTERVAL_MS } = require('../services/activity-auto');
+ const { resetSessionGains, recordOperation, initStatsWithPersistence, saveStats } = require('../services/stats');
+ const { initStatusBar, setStatusPlatform, statusData } = require('../services/status');
+ const { setRecordGoldExpHook } = require('../services/status');
+@@ -409,6 +410,8 @@ async function runStartupSequence(canContinue: () => boolean = () => loginReady)
+         startUnifiedScheduler();
+         startDailyRoutineTimer(false);
+         startMysteryShopTimer();
++        startActivityAutoTimer();
++        runExclusiveAutomationTask('activity_auto', runActivityAutoTick).catch(() => null);
+     } catch (e: any) {
+         log('系统', `登录启动序列执行失败: ${e.message}`, { module: 'system', event: '启动序列', result: 'error' });
+     }
+@@ -440,6 +443,24 @@ function startMysteryShopTimer(): void {
+     });
+ }
+ 
++async function runActivityAutoTick(): Promise<void> {
++    if (!loginReady) return;
++    const outcomes = await runActivityAutoTasks(getAutomation());
++    for (const item of outcomes || []) {
++        if (item?.title && item?.message) {
++            sendToMaster({ type: 'push_notify', title: item.title, content: item.message });
++        }
++    }
++}
++
++function startActivityAutoTimer(): void {
++    workerScheduler.clear('activity_auto_interval');
++    if (!loginReady || !isActivityAutoEnabled(getAutomation())) return;
++    workerScheduler.setIntervalTask('activity_auto_interval', ACTIVITY_AUTO_CHECK_INTERVAL_MS, () => {
++        runExclusiveAutomationTask('activity_auto', runActivityAutoTick).catch(() => null);
++    });
++}
++
+ function applyRuntimeConfig(snapshot: any, syncNow: boolean = false): number {
+     const rev = Number((snapshot || {}).__revision || 0);
+     if (rev > 0 && rev < appliedConfigRevision) {
+@@ -504,6 +525,7 @@ function applyRuntimeConfig(snapshot: any, syncNow: boolean = false): number {
+             }
+ 
+             startMysteryShopTimer();
++            startActivityAutoTimer();
+         }
+     }
+ 
+diff --git a/core/src/models/store/shared-state.ts b/core/src/models/store/shared-state.ts
+index af057a3..185bddd 100644
+--- a/core/src/models/store/shared-state.ts
++++ b/core/src/models/store/shared-state.ts
+@@ -70,6 +70,12 @@ const DEFAULT_ACCOUNT_CONFIG: AccountConfig = {
+         mystery_shop_allow_diamond: false,
+         mystery_shop_arrival_notify: false,
+         mystery_shop_purchase_notify: false,
++        activity_battle_pass_claim: false,
++        activity_charity_claim: false,
++        activity_charity_donate: false,
++        activity_qingmei_claim: false,
++        activity_qingmei_brew: false,
++        activity_milk_tea_fund_claim: false,
+         sell: true,
+         fertilizer: 'smart',
+         fertilizer_multi_season: true,
+diff --git a/core/src/services/activity-auto.ts b/core/src/services/activity-auto.ts
+new file mode 100644
+index 0000000..3582b68
+--- /dev/null
++++ b/core/src/services/activity-auto.ts
+@@ -0,0 +1,186 @@
++export {};
++/**
++ * 活动自动化：按账号自动化开关（automation.activity_*），定时执行限时活动的领取与操作。
++ *
++ * 设计要点：
++ * - 只复用 activity-center / milk-tea 现有服务能力，不新发协议命令；
++ * - 每个开关独立尝试，"无事可做"类错误（未开启/无可领/已领取）静默跳过；
++ * - 真错误记录日志并当日重试，单开关每天最多 3 次，避免刷日志与刷请求；
++ * - 成功结果由 worker 侧转成 push_notify 推送。
++ */
++
++const { log, getSystemDateKey } = require('./utils/utils');
++
++const ACTIVITY_AUTO_CHECK_INTERVAL_MS = 30 * 60 * 1000;
++const MAX_ERROR_ATTEMPTS_PER_DAY = 3;
++
++const QUIET_ERROR_PATTERNS = [
++    '没有可领取',
++    '暂无可领取',
++    '已领取',
++    '已经领取',
++    '无需重复领取',
++    '活动尚未开放或已经结束',
++    '未发现',
++    '请先开业',
++    '已解锁',
++];
++
++function isQuietError(error: any): boolean {
++    const text = String(error?.message || error || '');
++    return QUIET_ERROR_PATTERNS.some((pattern) => text.includes(pattern));
++}
++
++interface ActivityAutoState {
++    dateKey: string;
++    errorAttempts: number;
++}
++
++const stateByKey: Record<string, ActivityAutoState> = {};
++
++function stateFor(key: string): ActivityAutoState {
++    const today = getSystemDateKey();
++    let state = stateByKey[key];
++    if (!state || state.dateKey !== today) {
++        state = { dateKey: today, errorAttempts: 0 };
++        stateByKey[key] = state;
++    }
++    return state;
++}
++
++type ActivityOutcome = { title: string; message: string } | null;
++
++async function runBattlePassClaim(): Promise<ActivityOutcome> {
++    const { claimBattlePassRewards } = require('./activity-center');
++    const result = await claimBattlePassRewards();
++    const rewards = Array.isArray(result?.rewards) ? result.rewards : [];
++    return {
++        title: '活动自动化',
++        message: `游记奖励领取成功${rewards.length ? `（${rewards.length} 项）` : ''}`,
++    };
++}
++
++async function runCharityClaim(): Promise<ActivityOutcome> {
++    const activityCenter = require('./activity-center');
++    const dto = await activityCenter.getCurrentCharityRedFlowerActivity();
++    if (!dto || !dto.active) return null;
++
++    const messages: string[] = [];
++    if (dto.seedReward?.claimable) {
++        const result = await activityCenter.claimCharityRedFlowerSeeds();
++        messages.push(result?.message || '红花种子领取成功');
++    }
++    if (dto.actions?.claimDailyGift?.available) {
++        const result = await activityCenter.claimCharityRedFlowerDailyGift();
++        messages.push(result?.message || '每日礼包领取成功');
++    }
++    const pendingRewards = (Array.isArray(dto.progressRewards) ? dto.progressRewards : [])
++        .filter((reward: any) => reward?.claimable);
++    for (const reward of pendingRewards) {
++        try {
++            const result = await activityCenter.claimCharityRedFlowerProgressReward(reward.target);
++            messages.push(result?.message || `进度奖励（累计捐赠 ${reward.target}）领取成功`);
++        } catch (error: any) {
++            if (!isQuietError(error)) throw error;
++        }
++    }
++    if (!messages.length) return null;
++    return { title: '活动自动化', message: `公益小红花：${messages.join('；')}` };
++}
++
++async function runCharityDonate(): Promise<ActivityOutcome> {
++    const activityCenter = require('./activity-center');
++    const dto = await activityCenter.getCurrentCharityRedFlowerActivity();
++    if (!dto || !dto.active) return null;
++    if (!dto.actions?.donateLove?.available) return null;
++    const result = await activityCenter.donateCharityRedFlowerLove();
++    return {
++        title: '活动自动化',
++        message: result?.message || `公益小红花：已捐赠爱心 ${dto.loveBalance}`,
++    };
++}
++
++async function runQingmeiClaim(): Promise<ActivityOutcome> {
++    const activityCenter = require('./activity-center');
++    const dto = await activityCenter.getCurrentQingMeiActivity();
++    if (!dto) return null;
++    if (!dto.actions?.claimSeed?.available) return null;
++    const result = await activityCenter.claimQingMeiDailySeed();
++    return { title: '活动自动化', message: result?.message || '青梅每日种子领取成功' };
++}
++
++async function runQingmeiBrewStep(): Promise<ActivityOutcome> {
++    const activityCenter = require('./activity-center');
++    const dto = await activityCenter.getCurrentQingMeiActivity();
++    if (!dto) return null;
++    if (dto.actions?.settle?.available) {
++        const result = await activityCenter.settleQingMeiBrew();
++        return { title: '活动自动化', message: result?.message || '青梅酿已结算出售' };
++    }
++    if (dto.actions?.continue?.available) {
++        const result = await activityCenter.continueQingMeiBrew();
++        return { title: '活动自动化', message: result?.message || '青梅酿酿造进度已推进' };
++    }
++    if (!dto.started && Array.isArray(dto.ingredients) && dto.ingredients.length > 0) {
++        const ingredients = dto.ingredients.map((item: any) => ({ uid: item.uid, count: item.count }));
++        const result = await activityCenter.startQingMeiBrew(ingredients);
++        return { title: '活动自动化', message: result?.message || '青梅酿已开始酿造' };
++    }
++    return null;
++}
++
++async function runMilkTeaFundClaim(): Promise<ActivityOutcome> {
++    const { operateMilkTeaActivity } = require('./milk-tea');
++    const result = await operateMilkTeaActivity('fundClaim');
++    const rewards = Array.isArray(result?.rewards) ? result.rewards : [];
++    return {
++        title: '活动自动化',
++        message: `奶茶成长基金奖励领取成功${rewards.length ? `（${rewards.length} 项）` : ''}`,
++    };
++}
++
++const ACTIVITY_AUTO_HANDLERS: Record<string, { label: string; run: () => Promise<ActivityOutcome> }> = {
++    activity_battle_pass_claim: { label: '游记奖励', run: runBattlePassClaim },
++    activity_charity_claim: { label: '公益小红花', run: runCharityClaim },
++    activity_charity_donate: { label: '公益捐赠', run: runCharityDonate },
++    activity_qingmei_claim: { label: '青梅种子', run: runQingmeiClaim },
++    activity_qingmei_brew: { label: '青梅酿酒', run: runQingmeiBrewStep },
++    activity_milk_tea_fund_claim: { label: '奶茶基金', run: runMilkTeaFundClaim },
++};
++
++function isActivityAutoEnabled(automation: any): boolean {
++    if (!automation || typeof automation !== 'object') return false;
++    return Object.keys(ACTIVITY_AUTO_HANDLERS).some((key) => !!automation[key]);
++}
++
++async function runActivityAutoTasks(automation: any): Promise<Array<{ title: string; message: string }>> {
++    const outcomes: Array<{ title: string; message: string }> = [];
++    if (!automation || typeof automation !== 'object') return outcomes;
++    for (const [key, handler] of Object.entries(ACTIVITY_AUTO_HANDLERS)) {
++        if (!automation[key]) continue;
++        const state = stateFor(key);
++        if (state.errorAttempts >= MAX_ERROR_ATTEMPTS_PER_DAY) continue;
++        try {
++            const outcome = await handler.run();
++            if (outcome) {
++                log('活动', outcome.message, { module: 'activity', event: handler.label, result: 'success' });
++                outcomes.push(outcome);
++            }
++        } catch (error: any) {
++            if (isQuietError(error)) continue;
++            state.errorAttempts += 1;
++            log('活动', `${handler.label}自动执行失败（今日第 ${state.errorAttempts} 次）: ${error.message}`, {
++                module: 'activity',
++                event: handler.label,
++                result: 'error',
++            });
++        }
++    }
++    return outcomes;
++}
++
++module.exports = {
++    ACTIVITY_AUTO_CHECK_INTERVAL_MS,
++    isActivityAutoEnabled,
++    runActivityAutoTasks,
++};
+diff --git a/core/src/types/config.ts b/core/src/types/config.ts
+index 46ac605..a5b4c4d 100644
+--- a/core/src/types/config.ts
++++ b/core/src/types/config.ts
+@@ -37,6 +37,18 @@ export interface AutomationConfig {
+   mystery_shop_allow_diamond: boolean;
+   mystery_shop_arrival_notify: boolean;
+   mystery_shop_purchase_notify: boolean;
++  /** 游记（battle pass）可领奖励自动领取 */
++  activity_battle_pass_claim: boolean;
++  /** 公益小红花：自动领种子 / 每日礼包 / 进度奖励 */
++  activity_charity_claim: boolean;
++  /** 公益小红花：自动捐赠爱心（捐出全部余额） */
++  activity_charity_donate: boolean;
++  /** 青梅活动：自动领每日种子 */
++  activity_qingmei_claim: boolean;
++  /** 青梅活动：自动投料酿酒并结算出售 */
++  activity_qingmei_brew: boolean;
++  /** 奶茶活动：自动领取成长基金奖励 */
++  activity_milk_tea_fund_claim: boolean;
+   sell: boolean;
+   fertilizer: FertilizerMode;
+   fertilizer_multi_season: boolean;
+diff --git a/web/src/components/settings/AutomationSettingsForm.vue b/web/src/components/settings/AutomationSettingsForm.vue
+index 3a88b1d..e171435 100644
+--- a/web/src/components/settings/AutomationSettingsForm.vue
++++ b/web/src/components/settings/AutomationSettingsForm.vue
+@@ -81,6 +81,43 @@ const settings = defineModel<AutomationSettingsFormModel>({ required: true })
+           </div>
+         </section>
+ 
++        <section class="farm-card rounded-2xl p-4">
++          <div class="mb-4 flex items-start gap-3">
++            <div class="h-9 w-9 flex shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-600 dark:bg-rose-900/25 dark:text-rose-400">
++              <span class="i-carbon-gift text-xl" />
++            </div>
++            <div>
++              <h4 class="text-base text-gray-900 font-bold dark:text-gray-100">
++                活动自动化
++              </h4>
++              <p class="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
++                每 30 分钟检查一次，自动执行限时活动的领取与操作；活动未开始或已结束自动跳过
++              </p>
++            </div>
++          </div>
++
++          <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
++            <div class="automation-setting-item">
++              <BaseSwitch v-model="settings.automation.activity_battle_pass_claim" class="automation-setting-item" label="自动领取游记奖励" />
++            </div>
++            <div class="automation-setting-item">
++              <BaseSwitch v-model="settings.automation.activity_charity_claim" class="automation-setting-item" label="公益小红花：自动领种子/礼包/进度奖" />
++            </div>
++            <div class="automation-setting-item">
++              <BaseSwitch v-model="settings.automation.activity_charity_donate" class="automation-setting-item" label="公益小红花：自动捐赠爱心（全部）" />
++            </div>
++            <div class="automation-setting-item">
++              <BaseSwitch v-model="settings.automation.activity_qingmei_claim" class="automation-setting-item" label="青梅活动：自动领每日种子" />
++            </div>
++            <div class="automation-setting-item">
++              <BaseSwitch v-model="settings.automation.activity_qingmei_brew" class="automation-setting-item" label="青梅活动：自动酿酒并出售" />
++            </div>
++            <div class="automation-setting-item">
++              <BaseSwitch v-model="settings.automation.activity_milk_tea_fund_claim" class="automation-setting-item" label="奶茶活动：自动领成长基金奖励" />
++            </div>
++          </div>
++        </section>
++
+         <section class="farm-card rounded-2xl p-4">
+           <div class="mb-4 flex items-start gap-3">
+             <div class="h-9 w-9 flex shrink-0 items-center justify-center rounded-lg bg-amber-50 text-amber-600 dark:bg-amber-900/25 dark:text-amber-400">
+diff --git a/web/src/stores/setting.ts b/web/src/stores/setting.ts
+index 006beeb..b7aa02e 100644
+--- a/web/src/stores/setting.ts
++++ b/web/src/stores/setting.ts
+@@ -30,6 +30,12 @@ export interface AutomationConfig {
+   mystery_shop_allow_diamond?: boolean
+   mystery_shop_arrival_notify?: boolean
+   mystery_shop_purchase_notify?: boolean
++  activity_battle_pass_claim?: boolean
++  activity_charity_claim?: boolean
++  activity_charity_donate?: boolean
++  activity_qingmei_claim?: boolean
++  activity_qingmei_brew?: boolean
++  activity_milk_tea_fund_claim?: boolean
+   skip_own_weed_bug?: boolean
+   show_manual_fertilizer?: boolean
+ }
+-- 
+2.56.0
+

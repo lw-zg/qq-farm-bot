@@ -1,0 +1,344 @@
+From 838e4f584d3f61c6e9e049f372b11c9a0020fda9 Mon Sep 17 00:00:00 2001
+From: lw-zg <lw-zg@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 15:22:00 +0800
+Subject: [PATCH 7/9] feat: add milk tea auto upgrade/hire(with duration)/craft
+ automations
+
+---
+ core/src/models/store/shared-state.ts         |  7 ++
+ core/src/services/activity-auto.ts            | 79 ++++++++++++++++++-
+ core/src/types/config.ts                      |  8 ++
+ .../activity/ActivityAutomation.vue           | 49 ++++++++++++
+ .../settings/AutomationSettingsForm.vue       |  9 +++
+ .../settings/FeatureModuleSettings.vue        | 13 ++-
+ web/src/stores/setting.ts                     |  4 +
+ web/src/views/activity-center/MilkTeaPage.vue | 17 +++-
+ 8 files changed, 180 insertions(+), 6 deletions(-)
+
+diff --git a/core/src/models/store/shared-state.ts b/core/src/models/store/shared-state.ts
+index f598915..2207324 100644
+--- a/core/src/models/store/shared-state.ts
++++ b/core/src/models/store/shared-state.ts
+@@ -78,6 +78,10 @@ const DEFAULT_ACCOUNT_CONFIG: AccountConfig = {
+         activity_milk_tea_cashier_claim: false,
+         activity_milk_tea_wages_claim: false,
+         activity_milk_tea_fund_claim: false,
++        activity_milk_tea_upgrade: false,
++        activity_milk_tea_hire: false,
++        activity_milk_tea_craft: false,
++        activity_milk_tea_hire_duration_id: 1,
+         sell: true,
+         fertilizer: 'smart',
+         fertilizer_multi_season: true,
+@@ -355,6 +359,9 @@ function normalizeAccountConfig(input: unknown, fallback: AccountConfig = accoun
+                 cfg.automation.fertilizer_land_types = normalizeFertilizerLandTypes(v, cfg.automation.fertilizer_land_types);
+             } else if (k === 'fertilizer_smart_seconds') {
+                 cfg.automation.fertilizer_smart_seconds = Math.max(30, Math.min(3600, Number(v) || 300));
++            } else if (k === 'activity_milk_tea_hire_duration_id') {
++                const durationId = Number(v);
++                cfg.automation.activity_milk_tea_hire_duration_id = [1, 2, 3].includes(durationId) ? durationId : 1;
+             } else {
+                 (cfg.automation as any)[k] = !!v;
+             }
+diff --git a/core/src/services/activity-auto.ts b/core/src/services/activity-auto.ts
+index 9e98e06..bad0368 100644
+--- a/core/src/services/activity-auto.ts
++++ b/core/src/services/activity-auto.ts
+@@ -25,6 +25,11 @@ const QUIET_ERROR_PATTERNS = [
+     '未发现',
+     '请先开业',
+     '已解锁',
++    '员工位置已满',
++    '该员工当前不可雇佣',
++    '剩余营业时间不足',
++    '尚未达到店铺升级条件',
++    '请选择制作材料',
+ ];
+ 
+ function isQuietError(error: any): boolean {
+@@ -118,15 +123,81 @@ async function runMilkTeaAction(action: string): Promise<ActivityOutcome> {
+     return { title: '活动自动化', message: `奶茶活动：${labels[action]}` };
+ }
+ 
+-const ACTIVITY_AUTO_HANDLERS: Record<string, { label: string; run: () => Promise<ActivityOutcome> }> = {
+-    activity_battle_pass_claim: { label: '游记通行证', run: runBattlePassClaim },
+-    activity_solar_term_claim: { label: '节气奖励', run: runSolarTermClaim },
++const MILK_TEA_HIRE_DURATION_HOURS: Record<number, number> = { 1: 4, 2: 12, 3: 24 };
++
++function milkTeaHireDurationId(automation: any): number {
++    const value = Number(automation?.activity_milk_tea_hire_duration_id);
++    return MILK_TEA_HIRE_DURATION_HOURS[value] ? value : 1;
++}
++
++async function runMilkTeaUpgrade(): Promise<ActivityOutcome> {
++    const { getMilkTeaActivity, operateMilkTeaActivity } = require('./milk-tea');
++    const state = await getMilkTeaActivity('upgrade');
++    if (!state?.active || state.settling) return null;
++    if (!state.summary?.can_upgrade) return null;
++    const expectedLevel = Number(state.summary.level);
++    await operateMilkTeaActivity('upgrade', { expectedLevel });
++    return { title: '活动自动化', message: `奶茶活动：店铺升级成功（原 Lv.${expectedLevel}）` };
++}
++
++async function runMilkTeaHire(automation: any): Promise<ActivityOutcome> {
++    const { getMilkTeaActivity, operateMilkTeaActivity } = require('./milk-tea');
++    const { getServerTimeSec, toNum } = require('../utils/utils');
++    const durationId = milkTeaHireDurationId(automation);
++    const state = await getMilkTeaActivity('hireList', { durationId });
++    if (!state?.active || state.settling) return null;
++    const hire = state.hire;
++    if (!hire) return null;
++    const now = getServerTimeSec();
++    // 距结算剩余营业时间不足该时长档要求时不雇
++    if (Number(state.settleStartTime) - now < toNum(hire.min_remain_biz_sec)) return null;
++    const candidates = [...(hire.friends || []), ...(hire.robots || [])]
++        .filter((v: any) => toNum(v?.state) === 0 && toNum(v?.rehire_available_at) <= now);
++    if (!candidates.length) return null;
++    // 与 milk-tea perform 相同的空槽判定，满槽则跳过
++    const levelConfig = require('../activity-data/milk-tea-20261015.json');
++    const level = (levelConfig.MilkTeaStoreLevelConfig || []).find((v: any) => v.level === toNum(state.shop?.level));
++    const freeSlot = Array.from({ length: level?.employee_slot_count || 0 }, (_, slot) => slot)
++        .find(slot => !(state.shop?.slots || []).some((v: any) => toNum(v.slot_index) === slot && toNum(v.end_at) > now));
++    if (freeSlot === undefined) return null;
++    const target = candidates[0];
++    const wageTotal = toNum(hire.wage_total);
++    await operateMilkTeaActivity('hire', {
++        targetGid: String(target.friend?.gid),
++        durationId,
++        expectedCosts: [{ id: 1041, count: wageTotal }],
++    });
++    const name = target.friend?.name || `GID ${target.friend?.gid}` || '员工';
++    const hours = MILK_TEA_HIRE_DURATION_HOURS[durationId] || durationId;
++    return { title: '活动自动化', message: `奶茶活动：已雇佣 ${name}（${hours} 小时班，奶茶券 ×${wageTotal}）` };
++}
++
++async function runMilkTeaCraft(): Promise<ActivityOutcome> {
++    const { getMilkTeaActivity, operateMilkTeaActivity } = require('./milk-tea');
++    const { toNum } = require('../utils/utils');
++    const state = await getMilkTeaActivity('workshop');
++    if (!state?.active || state.settling) return null;
++    const fruits = (state.fruits || []).filter((v: any) => !v.locked && toNum(v.count) > 0).slice(0, 200);
++    if (!fruits.length) return null;
++    const result = await operateMilkTeaActivity('craft', {
++        fruits: fruits.map((v: any) => ({ uid: v.uid, count: v.count })),
++    });
++    const cups = Object.values(result?.result?.crafted_cups || {}).reduce((sum: number, value: any) => sum + Number(value || 0), 0);
++    return { title: '活动自动化', message: `奶茶活动：自动制作完成（${cups} 杯）` };
++}
++
++const ACTIVITY_AUTO_HANDLERS: Record<string, { label: string; run: (automation: any) => Promise<ActivityOutcome> }> = {
++    activity_battle_pass_claim: { label: '游记通行证', run: () => runBattlePassClaim() },
++    activity_solar_term_claim: { label: '节气奖励', run: () => runSolarTermClaim() },
+     activity_share_reward_share: { label: '快乐不独享·分享', run: () => runShareRewardAction('share') },
+     activity_share_reward_daily: { label: '快乐不独享·每日快乐值', run: () => runShareRewardAction('daily') },
+     activity_share_reward_milestones: { label: '快乐不独享·档位奖励', run: () => runShareRewardAction('milestones') },
+     activity_milk_tea_cashier_claim: { label: '奶茶·门店收益', run: () => runMilkTeaAction('claim') },
+     activity_milk_tea_wages_claim: { label: '奶茶·员工工资', run: () => runMilkTeaAction('wages') },
+     activity_milk_tea_fund_claim: { label: '奶茶·成长基金', run: () => runMilkTeaAction('fundClaim') },
++    activity_milk_tea_upgrade: { label: '奶茶·自动升级店铺', run: () => runMilkTeaUpgrade() },
++    activity_milk_tea_hire: { label: '奶茶·自动雇佣员工', run: automation => runMilkTeaHire(automation) },
++    activity_milk_tea_craft: { label: '奶茶·自动制作奶茶', run: () => runMilkTeaCraft() },
+ };
+ 
+ function isActivityAutoEnabled(automation: any): boolean {
+@@ -142,7 +213,7 @@ async function runActivityAutoTasks(automation: any): Promise<Array<{ title: str
+         const state = stateFor(key);
+         if (state.errorAttempts >= MAX_ERROR_ATTEMPTS_PER_DAY) continue;
+         try {
+-            const outcome = await handler.run();
++            const outcome = await handler.run(automation);
+             if (outcome) {
+                 log('活动', outcome.message, { module: 'activity', event: handler.label, result: 'success' });
+                 outcomes.push(outcome);
+diff --git a/core/src/types/config.ts b/core/src/types/config.ts
+index 0af68ea..0528710 100644
+--- a/core/src/types/config.ts
++++ b/core/src/types/config.ts
+@@ -53,6 +53,14 @@ export interface AutomationConfig {
+   activity_milk_tea_wages_claim: boolean;
+   /** 奶茶活动：自动领取成长基金奖励 */
+   activity_milk_tea_fund_claim: boolean;
++  /** 奶茶活动：自动升级店铺 */
++  activity_milk_tea_upgrade: boolean;
++  /** 奶茶活动：自动雇佣员工 */
++  activity_milk_tea_hire: boolean;
++  /** 奶茶活动：雇佣时长（1=4小时 2=12小时 3=24小时） */
++  activity_milk_tea_hire_duration_id: number;
++  /** 奶茶活动：自动制作奶茶 */
++  activity_milk_tea_craft: boolean;
+   sell: boolean;
+   fertilizer: FertilizerMode;
+   fertilizer_multi_season: boolean;
+diff --git a/web/src/components/activity/ActivityAutomation.vue b/web/src/components/activity/ActivityAutomation.vue
+index f6281e4..d01ac6d 100644
+--- a/web/src/components/activity/ActivityAutomation.vue
++++ b/web/src/components/activity/ActivityAutomation.vue
+@@ -6,8 +6,17 @@ import BaseSwitch from '@/components/ui/BaseSwitch.vue'
+ 
+ export interface ActivityAutomationItem { key: string, label: string }
+ 
++export interface ActivityAutomationSelect {
++  key: string
++  label: string
++  options: Array<{ value: number, label: string }>
++  /** 仅当该开关键为 true 时显示 */
++  showIf?: string
++}
++
+ const props = withDefaults(defineProps<{
+   items: ActivityAutomationItem[]
++  selects?: ActivityAutomationSelect[]
+   title?: string
+ }>(), { title: '自动化' })
+ 
+@@ -36,6 +45,36 @@ function isEnabled(key: string): boolean {
+   return !!(settingStore.settings?.automation as any)?.[key]
+ }
+ 
++function numberValue(key: string, fallback = 1): number {
++  const value = Number((settingStore.settings?.automation as any)?.[key])
++  return Number.isFinite(value) ? value : fallback
++}
++
++async function saveSelect(sel: ActivityAutomationSelect, event: Event) {
++  const accountId = String(accountStore.currentAccountId || '')
++  if (!accountId)
++    return
++  const previous = numberValue(sel.key)
++  const next = Number((event.target as HTMLSelectElement).value)
++  if (next === previous)
++    return
++  ;(settingStore.settings.automation as any)[sel.key] = next
++  saveError.value = ''
++  try {
++    const result = await settingStore.saveSettings(accountId, {
++      automation: { ...(settingStore.settings.automation as any), [sel.key]: next },
++    })
++    if (!result?.ok) {
++      ;(settingStore.settings.automation as any)[sel.key] = previous
++      saveError.value = result?.error || '保存失败'
++    }
++  }
++  catch (error: any) {
++    ;(settingStore.settings.automation as any)[sel.key] = previous
++    saveError.value = error?.message || '保存失败'
++  }
++}
++
+ async function toggle(item: ActivityAutomationItem) {
+   const accountId = String(accountStore.currentAccountId || '')
+   if (!accountId || savingKey.value)
+@@ -86,6 +125,16 @@ async function toggle(item: ActivityAutomationItem) {
+           @update:model-value="toggle(item)"
+         />
+       </div>
++      <div v-for="sel in props.selects || []" :key="sel.key" class="mt-2">
++        <label v-if="!sel.showIf || isEnabled(sel.showIf)" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-200">
++          {{ sel.label }}
++          <select :value="numberValue(sel.key)" class="rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800" @change="saveSelect(sel, $event)">
++            <option v-for="option in sel.options" :key="option.value" :value="option.value">
++              {{ option.label }}
++            </option>
++          </select>
++        </label>
++      </div>
+       <p v-if="saveError" class="mt-2 text-xs text-red-500">
+         {{ saveError }}
+       </p>
+diff --git a/web/src/components/settings/AutomationSettingsForm.vue b/web/src/components/settings/AutomationSettingsForm.vue
+index 9f81711..fa7a4aa 100644
+--- a/web/src/components/settings/AutomationSettingsForm.vue
++++ b/web/src/components/settings/AutomationSettingsForm.vue
+@@ -121,6 +121,15 @@ const settings = defineModel<AutomationSettingsFormModel>({ required: true })
+             <div class="automation-setting-item">
+               <BaseSwitch v-model="settings.automation.activity_milk_tea_fund_claim" class="automation-setting-item" label="奶茶：自动领成长基金奖励" />
+             </div>
++            <div class="automation-setting-item">
++              <BaseSwitch v-model="settings.automation.activity_milk_tea_upgrade" class="automation-setting-item" label="奶茶：自动升级店铺" />
++            </div>
++            <div class="automation-setting-item">
++              <BaseSwitch v-model="settings.automation.activity_milk_tea_hire" class="automation-setting-item" label="奶茶：自动雇佣员工" />
++            </div>
++            <div class="automation-setting-item">
++              <BaseSwitch v-model="settings.automation.activity_milk_tea_craft" class="automation-setting-item" label="奶茶：自动制作奶茶" />
++            </div>
+           </div>
+         </section>
+ 
+diff --git a/web/src/components/settings/FeatureModuleSettings.vue b/web/src/components/settings/FeatureModuleSettings.vue
+index befe490..f44c512 100644
+--- a/web/src/components/settings/FeatureModuleSettings.vue
++++ b/web/src/components/settings/FeatureModuleSettings.vue
+@@ -550,7 +550,18 @@ const enabledCount = computed(() => moduleKeys.filter(key => moduleEnabled(key))
+                   <BaseSwitch v-model="settings.automation.activity_milk_tea_cashier_claim" label="自动领取门店收益" />
+                   <BaseSwitch v-model="settings.automation.activity_milk_tea_wages_claim" label="自动领取员工工资" />
+                   <BaseSwitch v-model="settings.automation.activity_milk_tea_fund_claim" label="自动领取成长基金奖励" />
+-                </div>
++                  <BaseSwitch v-model="settings.automation.activity_milk_tea_upgrade" label="自动升级店铺" />
++                  <BaseSwitch v-model="settings.automation.activity_milk_tea_hire" label="自动雇佣员工" />
++                  <BaseSwitch v-model="settings.automation.activity_milk_tea_craft" label="自动制作奶茶" />
++                </div>
++                <label v-if="settings.automation.activity_milk_tea_hire" class="mt-2 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
++                  雇佣时长
++                  <select v-model.number="settings.automation.activity_milk_tea_hire_duration_id" class="rounded-lg border border-gray-200 bg-white px-2 py-1 text-sm dark:border-gray-600 dark:bg-gray-800">
++                    <option :value="1">4 小时</option>
++                    <option :value="2">12 小时</option>
++                    <option :value="3">24 小时</option>
++                  </select>
++                </label>
+                 <BaseButton variant="secondary" size="sm" class="mt-3" @click="router.push('/activity')">
+                   打开活动中心
+                   <span class="i-carbon-arrow-up-right ml-1" />
+diff --git a/web/src/stores/setting.ts b/web/src/stores/setting.ts
+index c82465d..b67d9c2 100644
+--- a/web/src/stores/setting.ts
++++ b/web/src/stores/setting.ts
+@@ -38,6 +38,10 @@ export interface AutomationConfig {
+   activity_milk_tea_cashier_claim?: boolean
+   activity_milk_tea_wages_claim?: boolean
+   activity_milk_tea_fund_claim?: boolean
++  activity_milk_tea_upgrade?: boolean
++  activity_milk_tea_hire?: boolean
++  activity_milk_tea_craft?: boolean
++  activity_milk_tea_hire_duration_id?: number
+   skip_own_weed_bug?: boolean
+   show_manual_fertilizer?: boolean
+ }
+diff --git a/web/src/views/activity-center/MilkTeaPage.vue b/web/src/views/activity-center/MilkTeaPage.vue
+index 90a4c83..333a641 100644
+--- a/web/src/views/activity-center/MilkTeaPage.vue
++++ b/web/src/views/activity-center/MilkTeaPage.vue
+@@ -31,6 +31,21 @@ const automationItems = [
+   { key: 'activity_milk_tea_cashier_claim', label: '自动领取门店收益' },
+   { key: 'activity_milk_tea_wages_claim', label: '自动领取员工工资' },
+   { key: 'activity_milk_tea_fund_claim', label: '自动领取成长基金奖励' },
++  { key: 'activity_milk_tea_upgrade', label: '自动升级店铺' },
++  { key: 'activity_milk_tea_hire', label: '自动雇佣员工' },
++  { key: 'activity_milk_tea_craft', label: '自动制作奶茶' },
++]
++const automationSelects = [
++  {
++    key: 'activity_milk_tea_hire_duration_id',
++    label: '雇佣时长',
++    showIf: 'activity_milk_tea_hire',
++    options: [
++      { value: 1, label: '4 小时' },
++      { value: 2, label: '12 小时' },
++      { value: 3, label: '24 小时' },
++    ],
++  },
+ ]
+ const panelTitles: Record<string, string> = { settings: '店铺设置', upgrade: '店铺升级', fund: '成长基金', workshop: '奶茶工坊', hireList: '好友雇佣', logs: '营业记录', rank: '排行榜', workItems: '工作事项' }
+ // 列表型弹窗在宽屏下加宽，每一项横向展开成一行
+@@ -217,7 +232,7 @@ onUnmounted(() => sequence++)
+         </div>
+       </div>
+       <main class="tea-scroll">
+-        <ActivityAutomation v-if="mainPage === 'auto'" :items="automationItems" title="奶茶活动自动化" />
++        <ActivityAutomation v-if="mainPage === 'auto'" :items="automationItems" :selects="automationSelects" title="奶茶活动自动化" />
+         <MilkTeaContent v-else-if="mainState" :key="mainPage" :state="mainState" :page="mainPage" :busy="busy" @navigate="navigate" @operation="request" @confirmation="select" @reload="reload" />
+         <div v-else class="empty">
+           <span>{{ !currentAccountId ? '请先选择账号' : busy ? '正在加载…' : '暂未获取到活动数据' }}</span><button v-if="currentAccountId && !busy" @click="request()">
+-- 
+2.56.0
+

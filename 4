@@ -1,0 +1,46 @@
+From 0b4c48a066ef975515341ea6ba1bb858228ea913 Mon Sep 17 00:00:00 2001
+From: lw-zg <lw-zg@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 14:32:59 +0800
+Subject: [PATCH 4/9] fix(web): put activity switches into
+ FeatureModuleSettings (live UI)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+AutomationSettingsForm is dead code since the settings page was
+reworked into the six feature-module cards; the switches were never
+rendered. Replace the 'no auto-claim switches in this version' note in
+the 日常与活动 module detail with the three activity automation
+switches.
+---
+ .../components/settings/FeatureModuleSettings.vue    | 12 +++++++-----
+ 1 file changed, 7 insertions(+), 5 deletions(-)
+
+diff --git a/web/src/components/settings/FeatureModuleSettings.vue b/web/src/components/settings/FeatureModuleSettings.vue
+index 5759990..94dd2a1 100644
+--- a/web/src/components/settings/FeatureModuleSettings.vue
++++ b/web/src/components/settings/FeatureModuleSettings.vue
+@@ -523,13 +523,15 @@ const enabledCount = computed(() => moduleKeys.filter(key => moduleEnabled(key))
+ 
+               <section class="feature-section">
+                 <div class="feature-section-title">
+-                  活动中心
++                  活动自动化
++                </div>
++                <div class="feature-switch-grid">
++                  <BaseSwitch v-model="settings.automation.activity_battle_pass_claim" label="自动领取游记奖励" />
++                  <BaseSwitch v-model="settings.automation.activity_share_reward" label="快乐不独享：自动分享/领奖" />
++                  <BaseSwitch v-model="settings.automation.activity_milk_tea_fund_claim" label="奶茶：自动领成长基金奖励" />
+                 </div>
+-                <p class="text-sm text-gray-600 dark:text-gray-300">
+-                  当前版本的活动奖励在「活动中心」手动领取：千星游记、观星礼录、星砂商店、节令活动、鹊桥寄情、雨落成诗、公益花等都在活动中心里操作。
+-                </p>
+                 <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+-                  这一版没有活动自动领取开关；活动进度、奖励和道具需要在活动中心逐个页面处理。
++                  每 30 分钟检查一次，活动未开始或已结束会自动跳过；领取成功会推送通知。
+                 </p>
+                 <BaseButton variant="secondary" size="sm" class="mt-3" @click="router.push('/activity')">
+                   打开活动中心
+-- 
+2.56.0
+

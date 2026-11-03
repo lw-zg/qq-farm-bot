@@ -1,0 +1,26 @@
+From 1c0ce7a141bdc8a5b6391ca345d37e5705eb785a Mon Sep 17 00:00:00 2001
+From: lw-zg <lw-zg@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 14:05:00 +0800
+Subject: [PATCH 3/9] fix: correct utils require path in activity-auto (runtime
+ crash)
+
+---
+ core/src/services/activity-auto.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/core/src/services/activity-auto.ts b/core/src/services/activity-auto.ts
+index 3754e35..51b5bfd 100644
+--- a/core/src/services/activity-auto.ts
++++ b/core/src/services/activity-auto.ts
+@@ -9,7 +9,7 @@ export {};
+  * - 成功结果由 worker 侧转成 push_notify 推送。
+  */
+ 
+-const { log, getSystemDateKey } = require('./utils/utils');
++const { log, getSystemDateKey } = require('../utils/utils');
+ 
+ const ACTIVITY_AUTO_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+ const MAX_ERROR_ATTEMPTS_PER_DAY = 3;
+-- 
+2.56.0
+

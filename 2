@@ -1,0 +1,210 @@
+From c4bf52270330e2170162b6e0b12ca832557aa7f5 Mon Sep 17 00:00:00 2001
+From: lw-zg <lw-zg@users.noreply.github.com>
+Date: Tue, 3 Nov 2026 13:39:11 +0800
+Subject: [PATCH 2/9] refine: scope activity switches to currently-running
+ activities
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Drop expired-activity switches (charity red flower 2026090901, qingmei
+20260812xx) and add the live share-reward activity (快乐不独享
+2026110104, part of the milk-tea group 2026110100): auto share / claim
+daily happiness / claim milestone rewards via share-reward-activity.
+
+Final switch set: activity_battle_pass_claim (dynamic current season),
+activity_share_reward, activity_milk_tea_fund_claim.
+---
+ core/src/models/store/shared-state.ts         |  5 +-
+ core/src/services/activity-auto.ts            | 85 +++++--------------
+ core/src/types/config.ts                      | 10 +--
+ .../settings/AutomationSettingsForm.vue       | 11 +--
+ web/src/stores/setting.ts                     |  5 +-
+ 5 files changed, 24 insertions(+), 92 deletions(-)
+
+diff --git a/core/src/models/store/shared-state.ts b/core/src/models/store/shared-state.ts
+index 185bddd..cb07a0e 100644
+--- a/core/src/models/store/shared-state.ts
++++ b/core/src/models/store/shared-state.ts
+@@ -71,10 +71,7 @@ const DEFAULT_ACCOUNT_CONFIG: AccountConfig = {
+         mystery_shop_arrival_notify: false,
+         mystery_shop_purchase_notify: false,
+         activity_battle_pass_claim: false,
+-        activity_charity_claim: false,
+-        activity_charity_donate: false,
+-        activity_qingmei_claim: false,
+-        activity_qingmei_brew: false,
++        activity_share_reward: false,
+         activity_milk_tea_fund_claim: false,
+         sell: true,
+         fertilizer: 'smart',
+diff --git a/core/src/services/activity-auto.ts b/core/src/services/activity-auto.ts
+index 3582b68..3754e35 100644
+--- a/core/src/services/activity-auto.ts
++++ b/core/src/services/activity-auto.ts
+@@ -60,73 +60,29 @@ async function runBattlePassClaim(): Promise<ActivityOutcome> {
+     };
+ }
+ 
+-async function runCharityClaim(): Promise<ActivityOutcome> {
+-    const activityCenter = require('./activity-center');
+-    const dto = await activityCenter.getCurrentCharityRedFlowerActivity();
+-    if (!dto || !dto.active) return null;
+-
++async function runShareRewardClaim(): Promise<ActivityOutcome> {
++    const { getShareRewardActivity, operateShareRewardActivity } = require('./share-reward-activity');
++    // 当前进行中的"快乐不独享"分享奖励活动（随奶茶活动组 2026110100 开启）
++    const SHARE_REWARD_ACTIVITY_ID = '2026110104';
++    const state = await getShareRewardActivity(SHARE_REWARD_ACTIVITY_ID);
++    if (!state?.active) return null;
+     const messages: string[] = [];
+-    if (dto.seedReward?.claimable) {
+-        const result = await activityCenter.claimCharityRedFlowerSeeds();
+-        messages.push(result?.message || '红花种子领取成功');
++    if (state.canShare) {
++        const result = await operateShareRewardActivity(SHARE_REWARD_ACTIVITY_ID, 'share');
++        messages.push(`分享成功（快乐值 +${result?.result?.granted_score ?? 0}）`);
+     }
+-    if (dto.actions?.claimDailyGift?.available) {
+-        const result = await activityCenter.claimCharityRedFlowerDailyGift();
+-        messages.push(result?.message || '每日礼包领取成功');
++    if (state.canClaimDaily) {
++        const result = await operateShareRewardActivity(SHARE_REWARD_ACTIVITY_ID, 'daily');
++        const rewards = Array.isArray(result?.rewards) ? result.rewards : [];
++        messages.push(`每日快乐值领取成功${rewards.length ? `（${rewards.length} 项）` : ''}`);
+     }
+-    const pendingRewards = (Array.isArray(dto.progressRewards) ? dto.progressRewards : [])
+-        .filter((reward: any) => reward?.claimable);
+-    for (const reward of pendingRewards) {
+-        try {
+-            const result = await activityCenter.claimCharityRedFlowerProgressReward(reward.target);
+-            messages.push(result?.message || `进度奖励（累计捐赠 ${reward.target}）领取成功`);
+-        } catch (error: any) {
+-            if (!isQuietError(error)) throw error;
+-        }
++    if (state.canClaimMilestones) {
++        const result = await operateShareRewardActivity(SHARE_REWARD_ACTIVITY_ID, 'milestones');
++        const rewards = Array.isArray(result?.rewards) ? result.rewards : [];
++        messages.push(`档位奖励领取成功${rewards.length ? `（${rewards.length} 项）` : ''}`);
+     }
+     if (!messages.length) return null;
+-    return { title: '活动自动化', message: `公益小红花：${messages.join('；')}` };
+-}
+-
+-async function runCharityDonate(): Promise<ActivityOutcome> {
+-    const activityCenter = require('./activity-center');
+-    const dto = await activityCenter.getCurrentCharityRedFlowerActivity();
+-    if (!dto || !dto.active) return null;
+-    if (!dto.actions?.donateLove?.available) return null;
+-    const result = await activityCenter.donateCharityRedFlowerLove();
+-    return {
+-        title: '活动自动化',
+-        message: result?.message || `公益小红花：已捐赠爱心 ${dto.loveBalance}`,
+-    };
+-}
+-
+-async function runQingmeiClaim(): Promise<ActivityOutcome> {
+-    const activityCenter = require('./activity-center');
+-    const dto = await activityCenter.getCurrentQingMeiActivity();
+-    if (!dto) return null;
+-    if (!dto.actions?.claimSeed?.available) return null;
+-    const result = await activityCenter.claimQingMeiDailySeed();
+-    return { title: '活动自动化', message: result?.message || '青梅每日种子领取成功' };
+-}
+-
+-async function runQingmeiBrewStep(): Promise<ActivityOutcome> {
+-    const activityCenter = require('./activity-center');
+-    const dto = await activityCenter.getCurrentQingMeiActivity();
+-    if (!dto) return null;
+-    if (dto.actions?.settle?.available) {
+-        const result = await activityCenter.settleQingMeiBrew();
+-        return { title: '活动自动化', message: result?.message || '青梅酿已结算出售' };
+-    }
+-    if (dto.actions?.continue?.available) {
+-        const result = await activityCenter.continueQingMeiBrew();
+-        return { title: '活动自动化', message: result?.message || '青梅酿酿造进度已推进' };
+-    }
+-    if (!dto.started && Array.isArray(dto.ingredients) && dto.ingredients.length > 0) {
+-        const ingredients = dto.ingredients.map((item: any) => ({ uid: item.uid, count: item.count }));
+-        const result = await activityCenter.startQingMeiBrew(ingredients);
+-        return { title: '活动自动化', message: result?.message || '青梅酿已开始酿造' };
+-    }
+-    return null;
++    return { title: '活动自动化', message: `快乐不独享：${messages.join('；')}` };
+ }
+ 
+ async function runMilkTeaFundClaim(): Promise<ActivityOutcome> {
+@@ -141,10 +97,7 @@ async function runMilkTeaFundClaim(): Promise<ActivityOutcome> {
+ 
+ const ACTIVITY_AUTO_HANDLERS: Record<string, { label: string; run: () => Promise<ActivityOutcome> }> = {
+     activity_battle_pass_claim: { label: '游记奖励', run: runBattlePassClaim },
+-    activity_charity_claim: { label: '公益小红花', run: runCharityClaim },
+-    activity_charity_donate: { label: '公益捐赠', run: runCharityDonate },
+-    activity_qingmei_claim: { label: '青梅种子', run: runQingmeiClaim },
+-    activity_qingmei_brew: { label: '青梅酿酒', run: runQingmeiBrewStep },
++    activity_share_reward: { label: '快乐不独享', run: runShareRewardClaim },
+     activity_milk_tea_fund_claim: { label: '奶茶基金', run: runMilkTeaFundClaim },
+ };
+ 
+diff --git a/core/src/types/config.ts b/core/src/types/config.ts
+index a5b4c4d..1ef3025 100644
+--- a/core/src/types/config.ts
++++ b/core/src/types/config.ts
+@@ -39,14 +39,8 @@ export interface AutomationConfig {
+   mystery_shop_purchase_notify: boolean;
+   /** 游记（battle pass）可领奖励自动领取 */
+   activity_battle_pass_claim: boolean;
+-  /** 公益小红花：自动领种子 / 每日礼包 / 进度奖励 */
+-  activity_charity_claim: boolean;
+-  /** 公益小红花：自动捐赠爱心（捐出全部余额） */
+-  activity_charity_donate: boolean;
+-  /** 青梅活动：自动领每日种子 */
+-  activity_qingmei_claim: boolean;
+-  /** 青梅活动：自动投料酿酒并结算出售 */
+-  activity_qingmei_brew: boolean;
++  /** 快乐不独享（2026110104）：自动分享/领每日快乐值/领档位奖励 */
++  activity_share_reward: boolean;
+   /** 奶茶活动：自动领取成长基金奖励 */
+   activity_milk_tea_fund_claim: boolean;
+   sell: boolean;
+diff --git a/web/src/components/settings/AutomationSettingsForm.vue b/web/src/components/settings/AutomationSettingsForm.vue
+index e171435..aa8ac08 100644
+--- a/web/src/components/settings/AutomationSettingsForm.vue
++++ b/web/src/components/settings/AutomationSettingsForm.vue
+@@ -101,16 +101,7 @@ const settings = defineModel<AutomationSettingsFormModel>({ required: true })
+               <BaseSwitch v-model="settings.automation.activity_battle_pass_claim" class="automation-setting-item" label="自动领取游记奖励" />
+             </div>
+             <div class="automation-setting-item">
+-              <BaseSwitch v-model="settings.automation.activity_charity_claim" class="automation-setting-item" label="公益小红花：自动领种子/礼包/进度奖" />
+-            </div>
+-            <div class="automation-setting-item">
+-              <BaseSwitch v-model="settings.automation.activity_charity_donate" class="automation-setting-item" label="公益小红花：自动捐赠爱心（全部）" />
+-            </div>
+-            <div class="automation-setting-item">
+-              <BaseSwitch v-model="settings.automation.activity_qingmei_claim" class="automation-setting-item" label="青梅活动：自动领每日种子" />
+-            </div>
+-            <div class="automation-setting-item">
+-              <BaseSwitch v-model="settings.automation.activity_qingmei_brew" class="automation-setting-item" label="青梅活动：自动酿酒并出售" />
++              <BaseSwitch v-model="settings.automation.activity_share_reward" class="automation-setting-item" label="快乐不独享：自动分享/领快乐值/档位奖" />
+             </div>
+             <div class="automation-setting-item">
+               <BaseSwitch v-model="settings.automation.activity_milk_tea_fund_claim" class="automation-setting-item" label="奶茶活动：自动领成长基金奖励" />
+diff --git a/web/src/stores/setting.ts b/web/src/stores/setting.ts
+index b7aa02e..715115c 100644
+--- a/web/src/stores/setting.ts
++++ b/web/src/stores/setting.ts
+@@ -31,10 +31,7 @@ export interface AutomationConfig {
+   mystery_shop_arrival_notify?: boolean
+   mystery_shop_purchase_notify?: boolean
+   activity_battle_pass_claim?: boolean
+-  activity_charity_claim?: boolean
+-  activity_charity_donate?: boolean
+-  activity_qingmei_claim?: boolean
+-  activity_qingmei_brew?: boolean
++  activity_share_reward?: boolean
+   activity_milk_tea_fund_claim?: boolean
+   skip_own_weed_bug?: boolean
+   show_manual_fertilizer?: boolean
+-- 
+2.56.0
+
