@@ -1,0 +1,61 @@
+name: Sync Upstream
+
+# 自动跟随上游更新：每天把上游 602832789/qq-farm-bot 的 main 合并进本 fork 的 main 并推回。
+on:
+  schedule:
+    # 每天 UTC 16:17 ≈ 北京时间次日 00:17（错开整点，降低 GitHub 调度排队）
+    - cron: "17 16 * * *"
+  workflow_dispatch: {}        # 允许在 Actions 页面手动点一下立即同步
+  push:
+    branches: ["main"]         # 提交本工作流后触发一次，便于立刻验证
+
+permissions:
+  contents: write              # 允许 GITHUB_TOKEN 推送本仓库
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # 仅在本仓库（lw-zg/qq-farm-bot）运行时生效，避免别人再 fork 本 fork 后空跑
+    if: github.repository == 'lw-zg/qq-farm-bot'
+    steps:
+      - name: Checkout fork default branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Sync from upstream
+        env:
+          UPSTREAM: "602832789/qq-farm-bot"
+          BRANCH: "main"
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM}.git"
+          git fetch upstream --prune
+
+          if ! git rev-parse --verify "upstream/${BRANCH}" >/dev/null 2>&1; then
+            echo "::error::上游分支 upstream/${BRANCH} 不存在"
+            exit 1
+          fi
+
+          BEHIND=$(git rev-list --count "HEAD..upstream/${BRANCH}")
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "✅ 已与上游 ${BRANCH} 同步，无需操作"
+            exit 0
+          fi
+
+          echo "⬇️ 落后上游 ${BEHIND} 个提交，开始合并..."
+          git checkout "${BRANCH}"
+          if git merge "upstream/${BRANCH}" --no-edit; then
+            git push origin "HEAD:${BRANCH}"
+            echo "🚀 已合并并推送 ${BRANCH}"
+          else
+            git merge --abort
+            echo "::error::与上游合并出现冲突，已中止。请在 fork 内手动处理或提 PR。"
+            exit 1
+          fi
