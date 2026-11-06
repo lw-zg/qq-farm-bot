@@ -311,9 +311,9 @@ onUnmounted(() => {
 <template>
   <section class="milk-workbench" aria-label="奶茶活动工作台" :aria-busy="busy || loading">
     <header class="tea-workbench-heading">
-      <img :src="teaImage('icon_s4_milktea_1')" alt="">
-      <div>
+      <div class="tea-heading-main">
         <div class="tea-title-line">
+          <img class="tea-heading-icon" :src="teaImage('icon_s4_milktea_1')" alt="">
           <h2>{{ state?.title || '奶茶热销中' }}</h2><span class="tea-badge"><span v-if="active" class="tea-dot" />{{ !inWindow ? now < MILK_TEA_ACTIVITY_WINDOW.startMs ? '未开始' : '已结束' : phase === 'settling' ? '结算期' : phase === 'ended' ? '已结束' : phase === 'upcoming' ? '未开始' : '进行中' }}</span>
         </div>
         <p class="tea-window">
@@ -321,10 +321,12 @@ onUnmounted(() => {
         </p>
       </div>
       <div class="tea-header-tools">
-        <button type="button" class="tea-icon-button" aria-label="返回活动中心" title="返回活动中心" @click="emit('back')">
-          <span class="i-carbon-arrow-left" aria-hidden="true" />
+        <!-- 返回入口统一放在工具行首位：沿用空状态里带箭头的文字按钮，
+             替换原来只有箭头、底色发白的方块图标按钮。 -->
+        <button type="button" class="tea-link tea-header-back" @click="emit('back')">
+          <span class="i-carbon-arrow-left" aria-hidden="true" />活动中心
         </button>
-        <span>剩余 {{ remaining }}</span>
+        <span class="tea-remaining">剩余 {{ remaining }}</span>
         <button type="button" class="tea-icon-button" aria-label="活动时间与规则" title="活动时间与规则" :disabled="blocked || !state" @click="open('rules')">
           <span class="i-carbon-information" aria-hidden="true" />
         </button>
@@ -353,16 +355,10 @@ onUnmounted(() => {
       <button v-if="!loading" type="button" class="tea-button" @click="refresh">
         <span class="i-carbon-renew" aria-hidden="true" />重新读取
       </button>
-      <button type="button" class="tea-button" @click="emit('back')">
-        <span class="i-carbon-arrow-left" aria-hidden="true" />返回活动中心
-      </button>
     </div>
     <template v-else>
       <div class="tea-workspace-layout">
         <aside class="tea-workspace-nav" aria-label="奶茶活动导航">
-          <button type="button" class="tea-link tea-workspace-back" @click="emit('back')">
-            <span class="i-carbon-arrow-left" aria-hidden="true" />活动中心
-          </button>
           <img class="tea-workspace-logo" :src="teaImage('img_s4Main_logo')" alt="奶茶热销中">
           <div class="tea-workspace-current">
             <span class="i-carbon-store" aria-hidden="true" />我的小店

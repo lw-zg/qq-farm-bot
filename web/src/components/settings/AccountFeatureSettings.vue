@@ -56,10 +56,13 @@ const activeInfo = computed(() => activeModule.value ? moduleInfo[activeModule.v
 const fertilizerName = computed(() => props.fertilizerOptions.find(item => item.value === automation.value.automation.fertilizer)?.label || '未设置')
 const selectedLandNames = computed(() => props.fertilizerLandTypeOptions.filter(item => automation.value.automation.fertilizer_land_types?.includes(item.value)).map(item => item.label))
 const selectedLandTypeCount = computed(() => Array.isArray(automation.value.automation.fertilizer_land_types) ? automation.value.automation.fertilizer_land_types.length : 0)
+function milkTeaOptionEffective(option: { requires?: string }) {
+  return !option.requires || !!automation.value.automation[option.requires]
+}
 const activityKeys = computed(() => [
   'star_solar_claim',
   'star_solar_quiz_claim',
-  ...(showMilkTeaActivity.value ? milkTeaSettings.value.map(setting => setting.key) : []),
+  ...(showMilkTeaActivity.value ? milkTeaSettings.value.filter(milkTeaOptionEffective).map(setting => setting.key) : []),
   'share_reward_share',
   'share_reward_daily',
   'share_reward_milestones',
@@ -138,7 +141,7 @@ function summaryTags(key: ModuleKey) {
     automation.value.automation.task ? '自动完成日常任务' : '不做日常',
     automation.value.automation.task_after_farm && '种植收获后巡查任务',
     (automation.value.automation.star_solar_claim || automation.value.automation.star_solar_quiz_claim) && '节令小札',
-    showMilkTeaActivity.value && milkTeaSettings.value.some(setting => automation.value.automation[setting.key]) && '奶茶热销中',
+    showMilkTeaActivity.value && milkTeaSettings.value.some(setting => milkTeaOptionEffective(setting) && automation.value.automation[setting.key]) && '奶茶热销中',
     shareRewardActivityEnabled.value && '快乐不独享',
     activityEnabledCount.value === 0 && !automation.value.automation.task && '未开启活动',
   ].filter(Boolean)
@@ -428,8 +431,10 @@ function cancel() {
                     <BaseSelect v-model="fertilizerSmartUnit" label="单位" :options="FERTILIZER_TIME_UNITS" class="w-32" />
                   </div>
                 </div>
-                <BaseSwitch v-model="automation.automation.fertilizer_2x2_ripen" label="2x2催熟" :disabled="mutationTestActive" />
-                <BaseSwitch v-model="automation.automation.fertilizer_multi_season" label="多季补肥" />
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
+                  <BaseSwitch v-model="automation.automation.fertilizer_2x2_ripen" label="2x2催熟" :disabled="mutationTestActive" />
+                  <BaseSwitch v-model="automation.automation.fertilizer_multi_season" label="多季补肥" />
+                </div>
               </section>
 
               <section v-if="automation.automation.fertilizer_buy_organic || automation.automation.fertilizer_buy_normal" class="border border-gray-100 rounded-lg p-4 space-y-3 dark:border-gray-700">
@@ -549,16 +554,13 @@ function cancel() {
               </section>
 
               <section class="border border-orange-100 rounded-lg p-4 space-y-3 dark:border-orange-900/40">
-                <div class="flex items-start justify-between gap-3">
-                  <div>
-                    <div class="text-sm text-gray-700 font-medium dark:text-gray-300">
-                      快乐不独享
-                    </div>
-                    <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      自动分享领取首次分享快乐值，无需好友点击；自动领取每日快乐值和已达成的档位奖励。
-                    </div>
+                <div>
+                  <div class="text-sm text-gray-700 font-medium dark:text-gray-300">
+                    快乐不独享
                   </div>
-                  <span class="rounded-full bg-orange-100 px-2 py-1 text-xs text-orange-700 dark:bg-orange-900/40 dark:text-orange-300">2026-09-24 00:00 — 2026-10-12 23:59</span>
+                  <div class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    自动分享领取首次分享快乐值，无需好友点击；自动领取每日快乐值和已达成的档位奖励。
+                  </div>
                 </div>
                 <div class="grid gap-3 sm:grid-cols-2">
                   <BaseSwitch v-model="automation.automation.share_reward_share" label="自动分享" />

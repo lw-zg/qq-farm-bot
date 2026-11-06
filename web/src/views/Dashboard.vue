@@ -182,7 +182,26 @@ const nextFarmCheck = ref('--:--:--')
 const nextHelpCheck = ref('--:--:--')
 const nextStealCheck = ref('--:--:--')
 const countdownNow = ref(Date.now())
-const localUptime = ref(0)
+/**
+ * 「已运行」时长。
+ *
+ * 旧实现是一个 ref：每秒 `localUptime++`，同时每 10s 被整包 status 的
+ * `uptime`（其实还是后端进程的 process.uptime）覆盖回去。两个来源来回
+ * 覆盖，数字会忽进忽退，长度一变整行就换行错位，看起来就是「位置跳来跳去」。
+ *
+ * 现在改成「服务端锚点 + 本地时间差」的 computed：
+ * - 单调递增，不会被覆盖回退；
+ * - 每秒只按本地时钟算，不依赖推送节奏；
+ * - 服务端值只作为锚点，且只接受明显推进的锚点，避免取整造成 ±1 抖动。
+ */
+const uptimeAnchorSec = ref(0)
+const uptimeAnchorAt = ref(0)
+const localUptime = computed(() => {
+  if (!uptimeAnchorSec.value)
+    return 0
+  const drift = Math.max(0, (countdownNow.value - uptimeAnchorAt.value) / 1000)
+  return Math.floor(uptimeAnchorSec.value + drift)
+})
 const milkTeaCheck = computed(() => milkTeaCountdown(status.value?.nextChecks?.milkTea, countdownNow.value))
 const farmCountdownTotal = ref(1)
 const helpCountdownTotal = ref(1)
@@ -213,8 +232,8 @@ function updateCountdowns() {
     return
   }
 
-  localUptime.value++
-
+  // 「已运行」不再在这里自增：它由 localUptime computed 依据
+  // countdownNow（本函数首行已更新）与服务端锚点算出，天然单调递增。
   if (farmQuiet) {
     nextFarmCheck.value = '静默中'
   }
@@ -275,9 +294,44 @@ watch(() => status.value?.nextChecks, (nextChecks) => {
   }
 }, { immediate: true })
 
+/**
+ * 服务端只作为锚点：明显推进才接受，避免整包推送到来时间与每秒自增互相覆盖。
+ *
+ * 但账号重启（或掉线后换新 worker）时 uptime 会归零，那也必须跟着归零，
+ * 否则「已运行」会一直卡着重启前的数字。用「回退幅度」区分两种情况：
+ * 小幅回退（< 60s）是取整/网络延迟造成的抖动，忽略；大幅回退视为重启，重新锚定。
+ */
 watch(() => status.value?.uptime, (uptime) => {
-  if (uptime !== undefined)
-    localUptime.value = uptime
+  const next = Number(uptime)
+  if (!Number.isFinite(next) || next <= 0)
+    return
+  const anchorAt = Date.now()
+  const projected = uptimeAnchorSec.value
+    ? uptimeAnchorSec.value + Math.max(0, (anchorAt - uptimeAnchorAt.value) / 1000)
+    : 0
+  const rolledBack = next + 60 < projected
+  // 允许 0.5s 的浮点/取整误差；不属于重启的小幅回退直接忽略，保证数字单调。
+  if (!rolledBack && next + 0.5 < projected)
+    return
+  uptimeAnchorSec.value = next
+  uptimeAnchorAt.value = anchorAt
+}, { immediate: true })
+
+/** 切换账号时立刻清空，避免短暂显示上一个账号的运行时长。 */
+watch(currentAccountId, () => {
+  uptimeAnchorSec.value = 0
+  uptimeAnchorAt.value = 0
+})
+
+/**
+ * 平台标签缓存：账号列表刷新失败的瞬间 currentAccount 会变 undefined，
+ * 直接绑 computed 会让「微信 / QQ」这两个字短暂消失，后面元素跟着左移。
+ */
+const platformLabel = ref('')
+watch(() => accountStore.currentAccount?.platform, (platform) => {
+  const label = getPlatformLabel(platform)
+  if (label)
+    platformLabel.value = label
 }, { immediate: true })
 
 /** 与旧版一致：状态就绪且连接在线时才展示真实倒计时。 */
@@ -452,7 +506,6 @@ function getOpColor(key: string | number) {
   return OP_META[String(key)]?.color || 'text-gray-400'
 }
 
-const platformLabel = computed(() => getPlatformLabel(accountStore.currentAccount?.platform))
 const accountAvatar = computed(() => {
   const account = accountStore.currentAccount
   if (!account)
@@ -694,8 +747,11 @@ useIntervalFn(updateCountdowns, 1000)
             </div>
             <div class="ov-presence">
               <span class="ov-presence__state" :class="isOnline ? 'is-online' : 'is-offline'">{{ isOnline ? '在线' : '离线' }}</span>
-              <span v-if="isOnline" class="ov-presence__item"><span class="i-carbon-time" />已运行 {{ formatDuration(localUptime) }}</span>
-              <span v-if="platformLabel" class="ov-presence__item">{{ platformLabel }}</span>
+              <!-- 运行信息收成一组：PC 端与「在线」同行，手机端整组落到下一行，避免逐项各自换行走位。 -->
+              <span class="ov-presence__meta">
+                <span v-if="isOnline" class="ov-presence__item"><span class="i-carbon-time" />已运行 {{ formatDuration(localUptime) }}</span>
+                <span v-if="platformLabel" class="ov-presence__item">{{ platformLabel }}</span>
+              </span>
             </div>
           </div>
           <BaseButton to="/personal" variant="primary" size="sm" class="ov-farm-entry" aria-label="进入我的农场">
@@ -1283,6 +1339,15 @@ useIntervalFn(updateCountdowns, 1000)
   font-size: 12px;
 }
 
+/* PC 端默认与「在线」同处一行，整组不拆散；换行只由窄屏媒体查询触发。 */
+.ov-presence__meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 4px 10px;
+  min-width: 0;
+}
+
 .ov-presence__state {
   display: inline-flex;
   align-items: center;
@@ -1778,6 +1843,13 @@ useIntervalFn(updateCountdowns, 1000)
 }
 
 @media (max-width: 639px) {
+  /* 手机端：「在线」占第一行，「已运行 + 平台标签」整组落到下面一行；
+     PC 端不触发，仍与在线图标同处一行。字号略缩，保证跨天时长也能完整一行显示。 */
+  .ov-presence__meta {
+    flex: 0 0 100%;
+    font-size: 11px;
+  }
+
   .dashboard-log-scroll {
     height: 430px;
     max-height: 430px;

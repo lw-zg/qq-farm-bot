@@ -30,6 +30,92 @@ flowchart TB
 ```
 
 ## 详细记录
+### 2026-11-06 · 功能模块「土地与施肥」2x2催熟开关间距
+
+- **问题**：`AccountFeatureSettings.vue` 施肥参数 section 里 `2x2催熟` 与 `多季补肥` 两个 `BaseSwitch` 都是 `display:inline-flex`，直接相邻时只靠模板换行产生的一个空白字符分隔，文字「2x2催熟」后面紧跟着下一个开关的旋钮，看起来挤在一起。
+- **修复**：把两个开关包进 `flex flex-wrap items-center gap-x-6 gap-y-3` 容器，PC 端固定 24px 横向间距；窄屏放不下时自动换行并保持 12px 行间距。两个开关的 `v-model`、label、`mutationTestActive` 禁用逻辑，以及全站 `.base-switch` 自身的 8px 开关↔文字间距全部不变，其它模块的开关不受影响。
+- 新增 `web/tests/fertilizer-switch-spacing.test.mjs` 2 项静态断言（间距容器 / 绑定与全局样式不变）；已反向验证：撤掉容器时 2 项均 fail，恢复后全绿。验证：web **67/67**、core 361/361、`vue-tsc -b`、改动文件 ESLint、`vite build` 全部通过。仍无浏览器 / 真机截图，纯静态断言 + 构建验证。
+
+### 2026-11-06 · 同步上游 muyuewang/qq-farm-bot-404（ed75089..3b3608c，PR #119–#121）并保留本地改动
+
+- **同步基线**：`upstream/main` 从 `ed75089`（上次同步提交 `f1dc717`）前进到 `3b3608c`，共 8 个上游提交，净增量 6 个文件：`core/src/services/milk-tea.ts`、`web/src/components/activity/ShareRewardActivity.vue`、`web/src/layouts/DefaultLayout.vue`、`web/src/views/activity-center/MilkTeaContent.vue` / `MilkTeaPage.vue` / `MilkTeaWork.vue`。本地与上游历史不同源（本地 640 提交为重建历史，上游为浅克隆 59 提交），沿用仓库既有的「逐项采纳 + sync 提交」做法，不做 `git merge`，避免把 2350 个历史差异文件反向覆盖本地。
+- **采纳**：上游 PR #120「无员工时雇佣页面报错」的后端修复——`normalizeShop()` 增加 `result.slots ??= []`，proto 未返回 `slots` 时统一归一是空数组；新增 `core/tests/milk-tea.test.js` 回归用例（已验证：去掉该行时测试 fail 1，恢复后通过）。前端 `web/src/utils/milk-tea.ts` 的 `teaOpenSlots()` / `teaHireReason()` 原本就有 `(state.shop.slots || [])` 兜底，本地前端无需改动。
+- **保留本地改动**：上游 `MilkTeaContent.vue` / `MilkTeaPage.vue` / `MilkTeaWork.vue` 三个视图在本地早已删除、替换为自绘的 `MilkTeaActivityPanel.vue` + `milk-tea-workbench.css`，因此其布局重构、奖励展示与「切换侧栏内容区空白」修复不移植、不恢复文件；`ShareRewardActivity.vue` / `DefaultLayout.vue` 的上游布局调整针对上游那套「页面级滚动 + 通配 `> *` 收窄到 `.activity-shell`」外壳，本地用的是 `.farm-page-content.is-activity-detail`（`overflow:hidden` + 子元素 `flex:1`）配 `.share-scroll` 内部滚动，直接套用会让「快乐不独享」长内容被裁剪且无法滚动，也会推翻刚定稿的手机端排版，故保留现状。首页状态行、土地气泡与二级弹窗、奶茶 4 个自动化开关、图鉴对齐、按钮文案等所有本地定制逐项原样保留。
+- 顺带把 `milk-tea.ts` 一处既有 ESLint 报错做等价替换（`[A-Za-z0-9_]` → `\w`），使改动文件 lint 全绿，不改变匹配行为。
+- 验证：core 361/361、web 65/65、`vue-tsc -b`、改动文件 ESLint、`vite build` 全部通过；本地未运行浏览器/真机，排版类改动本轮为零。
+
+### 2026-11-06 · 图鉴标题与收藏计数等高 + 奶茶两行左对齐
+
+- **收藏图鉴**：`BookOverview.vue` 的 `.book-overview__heading` 从 `align-items: baseline` 改为 `center`，新增 `--book-heading-line: 20px` 以「已收藏 x / y」的行高作为整行高度基准；`h3`「作物图鉴」与 `.book-overview__caption` 共用同一 `line-height`，两块垂直居中对齐、看起来一样高。标题 15px、计数 12px 的字号与字体格式完全不变（用户明确要求不改字体）。该组件被作物 / 超变图鉴、藏品、快乐不独享共用，四处概览标题一并对齐。
+- **奶茶热销中**：`.tea-stock-basic` 去掉左右 10px 内距（`padding: 10px 10px 0` → `10px 0 0`），使「普通奶茶 · 不限量供应 · 3 券 / 杯」与无内距的 `.tea-actions` 里「账号设置 / 自动化状态」共用同一左边缘，以后者为基准。
+- 新增 `web/tests/overview-alignment.test.mjs` 2 项回归测试（等高对齐且字号不变 / 两行左边缘一致）。web 65/65、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
+
+### 2026-11-06 · 奶茶页返回按钮文案简化为「活动中心」
+
+- 头部工具行首位 `.tea-link.tea-header-back` 按钮文案从「返回活动中心」改为「活动中心」四个字，箭头图标、透明文字样式、靠左位置与 `emit('back')` 行为不变；节令日历页 `SolarCalendar.vue` 的 `aria-label="返回活动中心"` 属于另一个组件，未改动。
+- `mobile-layout.test.mjs` / `settings-cleanup.test.mjs` 的文案计数断言同步：全页「活动中心」仍只出现 1 次、不再出现「返回活动中心」，并新增「箭头后直接跟四个字」断言。web 63/63、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
+
+### 2026-11-06 · 首页已运行手机端换行 + 去除奶茶侧栏「活动中心」/「快乐不独享」日期
+
+- **首页「在线 已运行 00:16:31 微信」**：PC 端保持原排布不变，仅手机端（≤639px）让「已运行 + 平台标签」整组落在在线图标的下一行。模板把两个 `ov-presence__item` 收进 `.ov-presence__meta`，基础样式 `inline-flex + nowrap` 保证组内不拆散；639px 媒体查询给该组 `flex: 0 0 100%` 独占第二行，并略缩到 11px 以容纳跨天时长。账号头结构、`v-if` 数据显隐、`localUptime` computed 与原有 `flex-wrap: wrap` 基础排布均未改动。
+- **奶茶活动页**：删除左侧栏 `tea-workspace-back`「活动中心」按钮（与头部「返回活动中心」重复），清理 850px 断点里对应的 CSS 死规则；头部「返回活动中心」按钮、侧栏 logo / 快捷入口 / 自动化状态保持不变，全页只留一个返回入口。
+- **功能模块自动化开关页**：删除「快乐不独享」右侧写死的活动日期徽标 `2026-09-24 00:00 — 2026-10-12 23:59`，标题、说明文案与三个开关（自动分享 / 每日快乐值 / 档位奖励）全部保留，标题区改回单列。
+- 新增 4 项回归测试（PC 基础不换行 / 手机端整组换行、侧栏按钮与 CSS 死规则清理且头部入口唯一、日期移除且字段齐全），新建 `web/tests/settings-cleanup.test.mjs`。web 63/63、core 360/360，`vue-tsc -b`、改动文件 eslint（0 error 0 warning）、`vite build` 全部通过。
+
+### 2026-11-06 · 土地等级二级弹窗缩小，与作物气泡同尺寸同风格
+
+- **问题**：从作物气泡点「土地等级 / 升级条件」打开的二级弹窗是 naive-ui `NModal + NCard`，`min(480px, 100vw-24px)` 宽、20px 圆角、大图 84×70、表格 9px 行距，和一级气泡（260px / 12px 圆角 / 12px 内距 / 10-12px 字号）差了一整档，手机端显得突兀。
+- **改法**：`LandDetailModal.vue` 弃用 `NModal/NCard`，改为 `Teleport to body` 的居中轻浮层 + 自绘卡片，尺寸与设计 token 逐项对齐一级气泡 —— 宽 `min(260px, calc(100vw - 32px))`（640px 以下 `100vw - 24px`）、`max-height: calc(100dvh - 24px)`、12px 内距 / 12px 圆角、`1px solid rgb(226 232 240)` 边框、`rgb(255 255 255 / .98)` 底、`0 14px 32px rgb(15 23 42 / .24)` 阴影；暗色边框/底色/文字同样一致。内部沿用 `bubble-cell`（8px 圆角浅灰卡）、`bubble-close`（20px）与 10-12px 字号。
+- **内容不变**：等级图片对比缩到 44×36，五行土地加成表压到 10-11px，条件与消耗物品用紧凑行展示；等级、加成、解锁/升级条件、消耗与余额判断、「当前已满级 / 部分条件暂未获取 / 当前可升级」提示全部保留，作物信息仍不出现。点击浮层外部与 ESC 均可关闭，父组件 `FarmPanel.vue` 的绑定零改动。
+- 新增 2 项回归测试：逐项比对两级弹窗的 9 条尺寸/风格声明与 3 条暗色声明，并锁住「不再使用 480px NCard / 土地信息字段齐全」。web 59/59、core 360/360，`vue-tsc -b`、改动文件 eslint（0 error 0 warning）、`vite build` 全部通过。
+
+### 2026-11-06 · 奶茶头部返回按钮合并 + 恢复「剩余时间」靠右对齐
+
+- **撤销上一轮「剩余时间靠右」的回滚**：按 `27b2d92` 原文恢复手机端工具区 `justify-content: flex-end`、剩余时间 `margin-left: auto` / `margin-right: 0`，639px 历史规则改回只压字号（去掉会把剩余推到最左的 `margin-right: auto`）。整段保持 `nowrap` + 等宽数字，剩余时间与「活动时间与规则 / 刷新」按钮靠右对齐成一排。
+- **去除头部白色方块返回按钮**：`tea-header-tools` 里只有箭头、底色发白的 `.tea-icon-button` 返回按钮删除；把原先只在「暂无活动数据 / 读取失败」空状态里出现的「⟵ 返回活动中心」文字按钮搬到工具行**首位**，改 `.tea-link + .tea-header-back`（透明背景、绿色文字、不折行，手机端缩到 10px），空状态原位置删除该按钮。头部始终渲染，因此全页只保留这一个「返回活动中心」入口，空状态仍留「重新读取」；侧栏「活动中心」链接与未开始/已结束页的「全部活动」按钮不变。
+- `mobile-layout.test.mjs` 头部测试改回靠右口径，并新增「白色图标按钮已移除 + 文字按钮位于工具行首位 + 空状态不再重复 + 新按钮透明不折行」回归。web 57/57、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
+
+### 2026-11-06 · 首页状态行再退一格 + 回滚「剩余时间」靠右对齐
+
+- **首页「在线 已运行 00:16:31 微信」再退一格**：按反馈退到 `f5c7d25` 跳位修复之前（`240e41a`）的原始排布 —— `.ov-presence` 恢复 `flex-wrap: wrap`，移除 `min-width: 0` / `overflow: hidden` 裁剪兜底；模板恢复 `v-if="isOnline"` 控制「已运行」整段显隐，去掉离线占位、`7ch` 等宽数字与平台标签固定列（`ov-presence__uptime` / `__digit` / `__platform` 相关样式一并删除）。**保留** `localUptime` computed 单调递增、服务端锚点与重启重新锚定、平台标签 ref 缓存这三处数据正确性修复 —— 它们不影响排布，回退会重新引入「数字忽进忽退」。
+- **「剩余 10 天 9 小时」靠右与按钮对齐回滚**：撤销 `27b2d92` 的靠右方案，恢复 `1980ffb` 的排布 —— 工具区 `justify-content: flex-start`、剩余 `margin-right: auto`，639px 历史规则同步恢复 `margin-right: auto`。领取收益「PC / 手机端同排」的改动保持不变。
+- 更新 `dashboard-presence.test.mjs`（前 3 项改为回退口径）与 `mobile-layout.test.mjs`（首页测试改「再退一格」、头部测试改「靠右已回滚」）。web 56/56、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
+
+### 2026-11-06 · 手机端排版再调整：首页恢复原方案 + 领取收益 PC/手机同排
+
+- **首页「在线 已运行 00:16:31 微信」恢复原方案**：按反馈回退上一条记录（`1980ffb`）里的固定三列栅格与手机端账号头两行方案 —— `.ov-presence` 回到单行 flex `nowrap` + `overflow: hidden` 兜底、时长数字回到 `7ch` 等宽、平台标签恢复 `v-if="platformLabel"`，账号头恢复 `min-w-0 flex-1` 的原始单行结构。手机端不再为了固定位置多占一行。
+- **领取收益模块 PC 与手机端排布不一致**：根因是同一张卡片写了两套布局 —— 基础 `.tea-claim` 是 `flex-wrap: wrap` 且 `<p>` 为块级（文案与数值天生两行），手机端却另写一套 grid；额外奖励里 `.tea-reward-name` 又是 `display: block`，把「金币」名称和数量拆成上下两排。修复：把 `grid-template-columns: auto minmax(0, 1fr) auto` 提到基础规则，图标 / 文案+数值+单位 / 领取按钮固定同排，`.tea-claim__extras` 固定第二行，`.tea-claim__value` 一律 `flex-wrap: nowrap` + `white-space: nowrap` + 数值 `overflow-wrap: normal`；额外奖励名称改 `inline` 与数量同排。手机端只保留字号、内距、图标尺寸覆盖，**不再重写 display / grid 列结构**，因此 PC 与手机端完全同一排。
+- **「剩余 10 天 9 小时」靠右与「活动时间与规则」按钮对齐**：手机端 639px 历史规则 `.tea-header-tools > span { margin-right: auto }` 把剩余时间顶到最左、按钮留在最右，两者虽然同行却分离。改成只压字号（不设 auto 外边距），统一排版块里工具区 `justify-content: flex-end` + 剩余 `margin-left: auto` / `margin-right: 0`，让剩余时间与规则、刷新按钮一起靠右对齐成一排，整段 `nowrap` + 等宽数字不换行。PC 端工具区本就是靠右一排，未改动。
+- 更新 `mobile-layout.test.mjs`：撤回上一轮 3 项首页栅格断言，新增「首页恢复原方案」回归；奶茶两条断言改为校验「基础规则统一 + 手机端只缩尺寸」与「剩余靠右」。web 57/57、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
+
+### 2026-11-06 · 手机端固定排版：首页已运行状态行 + 奶茶活动三处对齐
+
+- **「已运行 03:34:40 微信」位置仍不固定**：上一版只做了「禁止换行 + 等宽数字」，但手机端账号头是「头像 + 名字/状态 + 我的农场按钮」的单行 flex，状态行只剩约 170px，被 `overflow: hidden` 裁掉，平台标签又用 `v-if` 抽掉整段导致出现/消失时重排。修复：`.ov-presence` 改成固定三列栅格（`56px / 152px / 36px`，宽度写死、与容器宽度无关），平台标签与离线状态一样常驻占位（`visibility: hidden`），时长数字 `8ch` 等宽且不折行、跨天的「1天 03:34:40」也能完整显示；手机端 `.ov-account__head` 改两行栅格，中间容器 `display: contents` 让名字留在第一行、状态行 `grid-column: 1 / -1` 独占第二行并横跨整张卡片，不再与按钮抢宽度。
+- **奶茶活动头部「图标 / 奶茶热销中 / 进行中」不对齐**：根因是工具区（返回、剩余时间、规则、刷新）与标题区挤在同一个 flex 行，手机端标题区只剩约 98px，徽章被折到第二行、标题本身也会断行。修复：图标移进 `.tea-title-line`，与 `h2`、状态徽章成为同一 `nowrap` 行的三个元素；手机端头部拆两行，标题区 `flex: 1 1 100%` 占第一行、工具区同样占满第二行并 `flex-wrap: nowrap`。
+- **「剩余 10 天 10 小时」换行、跳位**：给该文本独立 class `tea-remaining`，加 `white-space: nowrap` 与等宽数字；删掉 850px 断点里 `.tea-header-tools > span:first-child { display: none }`（选择器本就匹配不到任何元素，语义还会误伤剩余时间），工具区独占一行后不会再被挤压。
+- **「待领取收益 198 奶茶券」显示不统一**：`.tea-claim` 基础是 `flex-wrap: wrap`，且 `<p>` 是块级元素使文案与数值天然分两行，`.tea-number` 的 `overflow-wrap: anywhere` 还会把数字拆断。修复：文案 / 数值 / 单位收进 `.tea-claim__value`，「收银台已满」与额外奖励移到 `.tea-claim__extras`；手机端 `.tea-claim` 用固定三列栅格（图标 / 数值行 / 领取按钮），数值行 `flex-wrap: nowrap` + `white-space: nowrap` + `overflow-wrap: normal`，额外奖励固定落到第二行，不挤压数值行。
+- 新增 6 项手机排版回归测试、更新 1 项状态行断言。web 59/59（+6）、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
+
+### 2026-11-06 · 土地气泡收益跟随变异叠加 + 奶茶活动 4 个新开关
+
+- **作物气泡里「每季经验 / 每季金币」是固定值**：根因在 `core/src/services/farm/land-analysis.ts` 的 `buildLandDetail()` —— 只按 `plant.exp` 和「果实单价 × 数量」算基础收益，完全没读变异效果。修复：解析官方 `MutantEffect.actions`（`2:x` 果实数量倍率、`3:x` 售价倍率、`4:0` 变身），数量倍率同时放大经验与金币、售价倍率只放大金币，同类倍率相乘形成叠加；后端直接输出叠加后的 `harvestExpPerSeason` / `harvestGoldPerSeason`，并附带 `harvestBonus`（基础值、两个倍率、逐条变异明细）。`LandCropBubble.vue` 据此展示 `×N` 徽标、「基础 xxx」和琥珀色变异来源说明，不在前端重复解析配置。变身果实（黄金 / 奶茶等）用金豆豆或活动币计价，只标注不折算进金币，避免把 `1005` / `1017` 的数量误显示成金币金额；空地与未解锁土地两项收益归零。
+- **「土地等级 / 升级条件」弹窗不再重复作物信息**：气泡里点进去的 `LandDetailModal.vue` 裁掉整个作物区（作物名、状态、成熟倒计时、生长季数、每季收益、阶段进度、变异效果、缺水草虫、催熟 / 铲除），只保留土地等级图片、五项加成表、解锁 / 升级条件、消耗物品与余额判断；`emits` 收窄为仅 `close`，催熟 / 铲除仍留在 `LandCropBubble`，`FarmPanel.vue` 去掉两个多余绑定。
+- **奶茶活动新增 4 个自动化开关（均在「功能模块 → 日常与活动 → 奶茶活动」）**：`同时购买金币果种子`、`同时购买经验蘑菇种子` 仅在「自动购买已解锁种子」开启时生效、默认不买 —— 它们是购种范围过滤，主开关关闭时 UI 禁用、后端也不会兑换这两类种子；`自动购买普通化肥`、`自动购买有机肥料` 是互不影响的独立调度动作，不受购种开关影响，按官方物品 ID（`80001~80004` / `100003` 普通，`80011~80014` / `100004` 有机，名称兜底）结合限购余量与各货币余额自动兑换。四处同步：`MILK_TEA_AUTOMATION_OPTIONS` 选项表、`DEFAULT_ACCOUNT_CONFIG.automation` 白名单与类型、`buildOps()` 执行器、`MilkTeaActivityPanel.vue` 表单；首页自动检查计数只加入两个化肥动作，附加种子开关不算独立待执行项；「推荐全自动」同样保持两个附加种子开关不勾选。
+- 新增 21 项回归测试（core 14 项：变异倍率叠加 7 项、购种范围 / 化肥识别 / 开关注册 7 项；web 7 项：开关注册与分类 5 项、气泡收益与弹窗裁剪 2 项）。core 360/360、web 53/53，双端类型检查、eslint、vite build 全部通过。
+
+### 2026-11-06 · 首页「已运行」不再跳位 + 重新登录后自动上线
+
+- **首页「已运行 / 微信 · QQ」偶尔跳来跳去**：两个原因叠加。① `.ov-presence` 用了 `flex-wrap: wrap`，时长从 `59:59` 进位到 `01:00:00`、或平台标签出现/消失时整行宽度越过阈值就掉到第二行，卡片高度随之变化；② 时长是两个来源互相覆盖 —— 每秒 `localUptime++`，每 10s 又被整包 `status.uptime` 冲回原值，数字忽进忽退。修复：状态行改单行不换行、时长数字等宽固定最小宽度、`v-if="isOnline"` 改为占位隐藏（离线不再抽掉整段把后面元素顶到左边）、平台标签改 `ref` 缓存（账号列表刷新失败的瞬间不闪掉）；时长改 `computed`，以服务端值为锚点 + 本地时间差推进，单调递增；保留「大幅回退视为账号重启、重新锚定」分支，避免重启后一直卡着旧数字。
+- **账号管理页重新扫码 / 填完新 Code 后不会直接登录**：上一版为了让编辑态重扫把新凭据写回原账号，前端开始带 `id` 提交。带 `id` 后不再走「备注名碰巧匹配」那条 relogin 分支，掉进 `wasRunning && !onlyRemarkChanged`——账号本来是停止状态时 `wasRunning` 为 `false`，结果既不 `restart` 也不 `start`。修复：把「带 id 且携带新登录凭据（code / refreshtoken / loginBuffer）」也认定为重新登录；在跑的重建 worker，已停止的直接启动（启动前会先换码）。新增/纯备注两类行为不变。
+- 新增 13 项回归测试（core 7 项：仅改备注不启停、带 id 重登已停止要启动、带 id 重登在运行要重启、非登录字段更新不误拉起、备注重登、新增账号自动启动；web 6 项：状态行 nowrap、离线占位、等宽数字、时长单调、重启归零可重锚、平台标签缓存）。core 346/346、web 46/46，双端类型检查、eslint、vite build 全部通过。
+
+### 2026-11-06 · 微信授权续期稳定性 + 土地详情恢复老版作物气泡
+
+- **「账号授权续期」会失败**：`refreshtoken` 是滚动凭证，手动按钮、定时重登、掉线重登、启动前换码四个入口并发时共用同一个旧 token，第二个必然被服务端拒绝；且旧值已作废却没落盘新值，导致之后续期持续失败。换 Code 失败时同样丢掉了刚滚动出来的新 token。修复：按账号串行锁（所有入口共用）、失败也落盘新 token / loginBuffer、批量续期改为优先用长效 `loginBuffer` 换 Code（老版 `ensureFreshGameCode` 策略）、只有 `loginBuffer` 而没有 `refreshtoken` 的账号也纳入可续期范围。
+- **重新扫码后访问凭证仍显示「待续期」颜色**：历史 `wxCredentialRefreshError` 从未清空（前端 payload 没带、后端只合并传入字段），颜色判定又只看错误字符串不看时间。修复：账号 Code / 长效凭据变化时后端自动清失败标记并刷新时间戳；扫码登录始终保存整套续期凭据（不再以 `refreshtoken` 为门槛）、编辑态重扫直接按 id 更新原账号；前端状态判定抽成 `getCredentialStatus`（秒/毫秒时间戳归一化、最近成功时间 + TTL 兜底、仅当最近失败晚于最近成功才标黄）。
+- **土地详情点开作物恢复老版就地气泡**：新增 `LandCropBubble.vue`（Teleport 到 body 的浮动气泡，含土地编号、状态徽章、成熟倒计时、生长季数、每季收益、阶段进度、变异效果与描述、缺水草虫标签、催熟/铲除），点击卡片或场景地块就地浮出，不再弹居中大弹窗；土地等级与升级条件改由气泡内「土地等级 / 升级条件」入口打开原 `LandDetailModal`。定位算法抽成 `computeBubblePosition`（默认贴上方、空间不足翻下方、视口钳制、小箭头跟随地块中心）。
+- 新增 29 项回归测试（core 11 项：账号凭据状态、串行锁、滚动 token 落盘；web 18 项：凭证状态、气泡定位、接线）。core 339/339、web 40/40，双端类型检查、eslint、vite build 全部通过。
+
 ### 2026-11-06 · 任意页面切换账号后保持原页面与原滚动位置
 
 - 手机端在页面中下部切号会跳回顶部，根因是切号时 `status.value = null`、活动中心 `snapshot` 被重置，页面主体内容瞬间卸载使 `#farm-page-content` 高度塌陷，浏览器把 `scrollTop` 钳制为 0，数据回填后不会自动还原。

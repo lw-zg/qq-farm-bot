@@ -37,6 +37,9 @@
 .tea-link { padding: 4px 0; border: 0; background: transparent; color: var(--tea-primary); font-size: 12px !important; text-decoration: none; }
 .tea-link:hover:not(:disabled) { text-decoration: underline; }
 .tea-button > span[class*="i-"], .tea-link > span[class*="i-"] { font-size: 16px; flex-shrink: 0; }
+/* 头部返回入口：透明文字按钮，取代原来底色发白的方块图标按钮。 */
+.tea-header-back { flex: none; gap: 5px; color: var(--tea-primary); font-size: 12px !important; white-space: nowrap; background: transparent; }
+.tea-header-back > span[class*="i-"] { font-size: 14px; }
 .tea-badge { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 5px; padding: 3px 7px; font-size: 11px; line-height: 1.5; font-weight: 500; border-radius: 4px; background: var(--tea-soft); color: var(--tea-muted); }
 .tea-badge--positive { background: var(--tea-positive); color: var(--tea-primary); }
 .tea-badge--warning { background: #fff4dc; color: #936422; }
@@ -53,9 +56,11 @@
 .tea-state > span[class*="i-"] { font-size: 36px; color: var(--tea-muted); opacity: .65; }
 .tea-state p { font-size: 12px; color: var(--tea-muted); }
 .tea-workbench-heading { position: relative; display: flex; gap: 14px; align-items: flex-start; min-height: 168px; padding: 28px 28px 58px; background: #ecf4e7 url('/activity/milk-tea/workbench/tea-atelier.jpg') center 57% / cover no-repeat; color: #264c36; isolation: isolate; }
-.tea-workbench-heading > img { width: 60px; height: 64px; flex-shrink: 0; }
-.tea-workbench-heading h2 { font-size: 25px; font-weight: 650; color: #264c36; }
-.tea-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.tea-heading-main { min-width: 0; flex: 1; }
+/* 图标与标题、状态徽章同处一行，保证三者在任何屏宽下垂直对齐、一起排版。 */
+.tea-heading-icon { width: 60px; height: 64px; flex: none; }
+.tea-workbench-heading h2 { min-width: 0; overflow: hidden; font-size: 25px; font-weight: 650; color: #264c36; text-overflow: ellipsis; white-space: nowrap; }
+.tea-title-line { display: flex; align-items: center; flex-wrap: nowrap; gap: 12px; min-width: 0; white-space: nowrap; }
 .tea-title-line .tea-badge { color: #26724a; background: #ffffffe6; }
 .tea-window { margin-top: 8px !important; font-size: 11px; line-height: 1.8; color: #536d56; }
 .tea-window > span { margin-inline: 6px; }
@@ -104,13 +109,24 @@
 .tea-operating { min-width: 0; }
 .tea-shop-name { min-width: 0; overflow-wrap: anywhere; }
 .tea-shop-name .tea-icon-button { width: 25px; height: 25px; font-size: 14px !important; }
-.tea-claim { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 15px 17px; margin-bottom: 25px; background: var(--tea-positive); border-left: 3px solid color-mix(in srgb, var(--tea-primary) 45%, var(--tea-surface)); }
-.tea-claim > img { width: 42px; height: 42px; flex-shrink: 0; }
-.tea-claim > div { flex: 1; min-width: 0; }
+/* 领取收益：图标 / 文案+数值+单位 / 按钮固定同排。PC 与手机端共用这一套栅格，
+   窄屏只缩字号和内距，不再另写一套会折行的布局。 */
+.tea-claim { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 12px; row-gap: 8px; padding: 15px 17px; margin-bottom: 25px; background: var(--tea-positive); border-left: 3px solid color-mix(in srgb, var(--tea-primary) 45%, var(--tea-surface)); }
+.tea-claim > img { grid-column: 1; grid-row: 1; width: 42px; height: 42px; flex-shrink: 0; }
+.tea-claim__value { grid-column: 2; grid-row: 1; display: flex; align-items: baseline; flex-wrap: nowrap; gap: 6px; min-width: 0; white-space: nowrap; }
+.tea-claim__value > * { flex: none; white-space: nowrap; }
 .tea-claim p { font-size: 11px; color: var(--tea-muted); }
-.tea-claim strong { font-size: 23px; color: var(--tea-primary); font-weight: 600; margin-right: 6px; }
+.tea-claim strong { font-size: 23px; color: var(--tea-primary); font-weight: 600; margin-right: 0; overflow-wrap: normal; }
 .tea-claim small { font-size: 11px; color: var(--tea-muted); }
-.tea-claim .tea-rewards { margin-top: 7px; }
+.tea-claim__action { grid-column: 3; grid-row: 1; justify-self: end; }
+/* 「收银台已满」与额外奖励固定落在第二行，不参与数值行排布。 */
+.tea-claim__extras { grid-column: 1 / -1; grid-row: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 7px; margin-top: 2px; }
+.tea-claim__extras .tea-rewards { margin-top: 0; }
+/* 额外奖励的「金币」名称与数量同排，PC / 手机端一致，不再上下两排。 */
+.tea-claim__extras .tea-reward { flex: none; }
+.tea-claim__extras .tea-reward > span:last-child { white-space: nowrap; }
+.tea-claim__extras .tea-reward-name { display: inline; margin-right: 4px; overflow-wrap: normal; }
+.tea-remaining { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .tea-check { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--tea-muted); cursor: pointer; }
 .tea-check input, .tea-fruit-choice input, .tea-allow-hire input, .tea-recipe-row input { width: 15px; height: 15px; margin: 0; flex-shrink: 0; accent-color: var(--tea-primary); }
 .tea-recipe-head, .tea-recipe-row { display: grid; grid-template-columns: 21px minmax(125px, 1fr) 80px 100px 77px; align-items: center; gap: 7px; }
@@ -321,13 +337,14 @@
 @media (max-width: 639px) {
   .tea-workbench-heading { min-height: 166px; padding: 23px 16px 57px; background-size: auto 166px; background-position: right center; }
   .tea-workbench-heading::before { content: ""; position: absolute; inset: 0; z-index: -1; background: #f5fbf1ab; }
-  .tea-workbench-heading > img { width: 43px; height: 48px; }
+  .tea-heading-icon { width: 43px; height: 48px; }
   .tea-workbench-heading h2 { font-size: 21px; }
   .tea-title-line { gap: 7px; }
   .tea-window { font-size: 10px; }
   .tea-window > span { margin-inline: 2px; }
   .tea-header-tools { left: 16px; right: 16px; bottom: 20px; }
-  .tea-header-tools > span { margin-right: auto; font-size: 11px; }
+  /* 只压字号：旧的 auto 外边距会把「剩余」推到最左，与右侧按钮失去对齐。 */
+  .tea-header-tools > span { font-size: 11px; }
   .tea-tabs { gap: 21px; padding: 0 16px; }
   .tea-tabs button { min-height: 44px; font-size: 12px; gap: 5px; }
   .tea-tabs button > span[class*="i-"] { font-size: 14px; }
@@ -346,7 +363,8 @@
   .tea-heading small { font-size: 10px; }
   .tea-shop-name { flex-wrap: wrap; gap: 5px !important; }
   .tea-link { font-size: 11px !important; }
-  .tea-claim { gap: 9px; padding: 13px 10px; margin-bottom: 22px; }
+  /* 列间距沿用基础栅格，窄屏只在末尾统一排版块里收紧。 */
+  .tea-claim { margin-bottom: 22px; }
   .tea-claim > img { width: 30px; height: 34px; }
   .tea-claim strong { font-size: 21px; }
   .tea-claim .tea-button { font-size: 11px !important; padding-inline: 10px; }
@@ -459,7 +477,7 @@
 .tea-workspace-auto { margin: 24px 7px 0; }
 .tea-workspace-main { min-width: 0; }
 .tea-workbench-heading { min-height: auto; padding: 22px 26px; background: var(--tea-soft); color: var(--tea-text); align-items: center; }
-.tea-workbench-heading > img { width: 40px; height: 47px; }
+.tea-heading-icon { width: 40px; height: 47px; }
 .tea-workbench-heading h2 { font-size: 23px; color: var(--tea-text); }
 .tea-window { color: var(--tea-muted); }
 .tea-header-tools { position: static; margin-left: auto; flex-wrap: wrap; justify-content: flex-end; }
@@ -479,7 +497,8 @@
 .tea-stock-item strong { display: block; margin-block: 5px; font-size: 18px; }
 .tea-stock-item small { font-size: 10px; display: block; color: var(--tea-primary); overflow-wrap: anywhere; }
 .tea-stock-item strong small { display: inline; margin-left: 4px; color: var(--tea-muted); font-weight: 400; }
-.tea-stock-basic { grid-column: 1 / -1; padding: 10px 10px 0; border-top: 1px dashed var(--tea-border); }
+/* 与 .tea-actions 的「账号设置 / 自动化状态」共用同一左边缘：不额外缩进 10px。 */
+.tea-stock-basic { grid-column: 1 / -1; padding: 10px 0 0; border-top: 1px dashed var(--tea-border); }
 .tea-stock-basic .tea-link { font-size: 10px !important; }
 .tea-craft-prompt { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px; margin-top: 17px; border-left: 3px solid var(--tea-primary); background: var(--tea-positive); }
 .tea-craft-prompt h3 { font-size: 12px; }
@@ -578,17 +597,17 @@
   .tea-workspace-layout { grid-template-columns: minmax(0, 1fr); }
   .tea-workspace-nav { border-right: 0; padding: 12px 16px; border-bottom: 1px solid var(--tea-border); }
   .tea-workspace-logo, .tea-workspace-current, .tea-workspace-auto { display: none; }
-  .tea-workspace-back { margin-bottom: 10px; }
   .tea-quick-entries { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; }
   .tea-quick-entry { grid-template-columns: minmax(0, 1fr); padding: 10px 8px; gap: 5px; border-color: var(--tea-border); min-height: 109px; }
   .tea-quick-entry > span:last-child { display: none; }
   .tea-quick-entry small { font-size: 9px; }
-  .tea-header-tools > span:first-child { display: none; }
+  /* 「剩余 X 天 X 小时」在窄屏也要完整显示，只压字号，不隐藏首个文本节点。 */
+  .tea-header-tools > .tea-remaining { font-size: 11px; }
 }
 @media (max-width: 639px) {
   .tea-workbench-heading { min-height: auto; padding: 17px 16px; gap: 10px; }
   .tea-workbench-heading::before { display: none; }
-  .tea-workbench-heading > img { width: 30px; height: 36px; }
+  .tea-heading-icon { width: 30px; height: 36px; }
   .tea-workbench-heading h2 { font-size: 19px; }
   .tea-header-tools { gap: 4px; flex-wrap: nowrap; }
   .tea-header-tools .tea-operation-status { display: none; }
@@ -622,4 +641,106 @@
   .tea-hire-durations { gap: 6px; }
   .tea-automation-row { font-size: 12px; }
   .tea-automation-summary { flex-wrap: wrap; }
+}
+
+/* ==========================================================================
+   手机端统一排版（放在最后，覆盖上面的历史窄屏规则）
+   头部拆成两行：第一行「图标 + 活动名 + 进行中」，第二行工具区，返回按钮留在左侧、
+   剩余时间与按钮靠右对齐成一排；领取收益沿用基础栅格，PC / 手机端都是同一排不换行。
+   ========================================================================== */
+@media (max-width: 639px) {
+  .tea-workbench-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 12px;
+  }
+
+  .tea-heading-main {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .tea-title-line {
+    flex-wrap: nowrap;
+    gap: 7px;
+    min-width: 0;
+    white-space: nowrap;
+  }
+
+  .tea-heading-icon {
+    width: 26px;
+    height: 31px;
+    flex: none;
+  }
+
+  .tea-workbench-heading h2 {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 17px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .tea-title-line .tea-badge {
+    flex: none;
+    padding: 2px 6px;
+    font-size: 10px;
+    white-space: nowrap;
+  }
+
+  .tea-window {
+    overflow: hidden;
+    font-size: 9px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* 工具区独占第二行：返回按钮留在左侧，剩余时间与「活动时间与规则 / 刷新」
+     按钮一起靠右对齐成一排，整段不换行。 */
+  .tea-header-tools {
+    flex: 1 1 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-left: 0;
+    min-width: 0;
+  }
+
+  .tea-header-back { gap: 3px; font-size: 10px !important; }
+  .tea-header-back > span[class*="i-"] { font-size: 12px; }
+
+  .tea-header-tools .tea-remaining {
+    flex: none;
+    margin-left: auto;
+    margin-right: 0;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .tea-header-tools .tea-icon-button {
+    width: 28px;
+    height: 28px;
+    flex: none;
+  }
+
+  .tea-header-tools .tea-operation-status {
+    display: none;
+  }
+
+  /* 领取收益只缩尺寸，列结构完全沿用基础栅格：PC 与手机端都是同一排。 */
+  .tea-claim {
+    column-gap: 7px;
+    row-gap: 6px;
+    padding: 11px 10px;
+  }
+
+  .tea-claim > img { width: 28px; height: 32px; }
+  .tea-claim__value { gap: 4px; }
+  .tea-claim__value p { font-size: 10px; }
+  .tea-claim__value strong { font-size: 19px; }
+  .tea-claim__value small { font-size: 10px; }
+  .tea-claim__extras { margin-top: 0; }
 }

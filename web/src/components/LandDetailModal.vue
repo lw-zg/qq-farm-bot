@@ -1,133 +1,16 @@
 <script setup lang="ts">
-import { NButton } from 'naive-ui/es/button'
-import { NCard } from 'naive-ui/es/card'
-import { NModal } from 'naive-ui/es/modal'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { canRipenLand } from '@/utils/ripen-land'
+import { computed, onMounted, onUnmounted } from 'vue'
 
+/**
+ * 土地等级 / 升级条件：从作物气泡点开的二级详情。
+ * 视觉与 LandCropBubble.vue 的 .land-bubble 完全同源（260px / 12px 圆角 / 12px 内距 /
+ * 白底浅边框 / 轻阴影 / 10-12px 字号），只是改为居中浮层，内容只讲土地本身。
+ */
 const props = defineProps<{ land: any, player: any, connected: boolean }>()
-const emit = defineEmits<{ close: [], fertilize: [], remove: [] }>()
+const emit = defineEmits<{ close: [] }>()
 const info = computed(() => props.land?.landInfo)
 
-/* ===== 作物信息（老版地块气泡口径）===== */
-const land = computed(() => props.land)
-
-const now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | null = null
-onMounted(() => {
-  timer = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
-})
-onUnmounted(() => {
-  if (timer)
-    clearInterval(timer)
-})
-watch(() => props.land, () => {
-  now.value = Date.now()
-})
-
-const hasCrop = computed(() => Boolean(
-  land.value?.plantName
-  || Number(land.value?.matureInSec) > 0
-  || ['growing', 'harvestable', 'stealable', 'harvested', 'dead'].includes(String(land.value?.status || '')),
-))
-
-const statusLabel = computed(() => {
-  const status = String(land.value?.status || '')
-  const phaseName = String(land.value?.phaseName || '').trim()
-  // “生长中”只是地块的操作状态；详情里应展示当前作物阶段。
-  if (status === 'growing' && phaseName)
-    return phaseName
-  const labels: Record<string, string> = {
-    harvestable: '可收获',
-    stealable: '可采摘',
-    harvested: '已成熟',
-    growing: '生长中',
-    dead: '已枯萎',
-    empty: '空闲',
-    locked: '未解锁',
-  }
-  return labels[status] || phaseName || '未知状态'
-})
-
-/** 变异效果：图标按 icon 名取官方运行时素材，闪电走雨落成诗专用图。 */
-const mutantEffects = computed(() => {
-  const effects = Array.isArray(land.value?.mutantEffects) ? land.value.mutantEffects : []
-  return effects.map((effect: any) => {
-    const icon = String(effect?.icon || '').trim()
-    const name = String(effect?.name || effect?.effect_name || icon || '变异').trim()
-    const collections = Array.isArray(effect?.collections) ? effect.collections : []
-    const description = String(effect?.description || effect?.desc || effect?.tips || '').trim()
-    const actions = String(effect?.actions || '').trim()
-    const fruitName = String(effect?.fruit_name || '').trim()
-    return {
-      id: Number(effect?.id) || 0,
-      name,
-      icon,
-      image: icon === 'lightning'
-        ? '/game-config/effect_images/rain-poem/lightning-sense.png?v=2'
-        : (icon ? `/game-config/seed_images_named/mutant/${icon}.png` : ''),
-      tag: String(effect?.tag || '').trim(),
-      description,
-      detail: buildMutantDetail(name, actions, fruitName, description, collections),
-    }
-  }).filter((effect: any) => effect.icon || effect.name)
-})
-
-/** 官方 actions 字段（"类型:倍数"）：2=数量，3=售价，4=变身果实，其它类型不展示倍数。 */
-function mutantMultiplierText(actions: string, fruitName: string) {
-  const [type, mult = 0] = actions.split(':').map(part => Number(part) || 0)
-  if (type === 2 && mult > 0)
-    return `数量*${mult}倍`
-  if (type === 3 && mult > 0)
-    return `售价*${mult}倍`
-  if (type === 4)
-    return fruitName ? `变身·${fruitName}` : '变身果实'
-  return ''
-}
-
-/** 详情行：名称 · 效果倍数 · 触发条件（藏品变异追加藏品名）。 */
-function buildMutantDetail(name: string, actions: string, fruitName: string, description: string, collections: any[]) {
-  const parts = [name, mutantMultiplierText(actions, fruitName)]
-  const collectionNames = collections.map((item: any) => String(item?.name || '').trim()).filter(Boolean)
-  if (collectionNames.length)
-    parts.push(`涉及藏品：${[...new Set(collectionNames)].join('、')}`)
-  if (description && description !== name)
-    parts.push(description)
-  return parts.filter(Boolean).join('·')
-}
-
-const phaseProgress = computed(() => {
-  const start = Number(land.value?.phaseStartTime) || 0
-  const end = Number(land.value?.phaseEndTime) || 0
-  if (end > start) {
-    const duration = end - start
-    const elapsed = Math.min(duration, Math.max(0, now.value / 1000 - start))
-    return { percent: Math.round(elapsed / duration * 100), elapsed, duration }
-  }
-  if (['harvestable', 'stealable', 'harvested', 'dead'].includes(String(land.value?.status || '')))
-    return { percent: 100, elapsed: 0, duration: 0 }
-  return null
-})
-
-function formatTime(sec: number) {
-  if (sec <= 0)
-    return ''
-  const wholeSeconds = Math.floor(sec)
-  const h = Math.floor(wholeSeconds / 3600)
-  const m = Math.floor((wholeSeconds % 3600) / 60)
-  const s = wholeSeconds % 60
-  return `${h > 0 ? `${h}:` : ''}${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-}
-
-/** 催熟（老版 ripenLand 口径）：生长中的未成熟作物才可催熟。 */
-const canRipen = computed(() => canRipenLand(land.value))
-
-/** 铲除：有作物的非锁定地块可用。 */
-const canRemove = computed(() => hasCrop.value && !['locked', 'empty'].includes(String(land.value?.status || '')))
-
-/* ===== 土地等级 / 升级条件（原土地详情保留） ===== */
+/* ===== 土地等级 / 升级条件 ===== */
 const metrics = [
   { key: 'yieldBonus', label: '产量加成', unit: '%' },
   { key: 'growthReduction', label: '成长提速', unit: '%' },
@@ -156,405 +39,301 @@ function format(value: unknown) {
   const parsed = integer(value)
   return parsed === null ? '—' : parsed.toLocaleString('zh-CN')
 }
+
+function onKeydown(event: KeyboardEvent) {
+  if (props.land && event.key === 'Escape')
+    emit('close')
+}
+onMounted(() => document.addEventListener('keydown', onKeydown))
+onUnmounted(() => document.removeEventListener('keydown', onKeydown))
 </script>
 
 <template>
-  <NModal :show="!!land" @update:show="!$event && emit('close')">
-    <NCard class="land-detail-modal" :bordered="false" closable role="dialog" aria-modal="true" aria-label="土地详情" @close="emit('close')">
-      <template #header>
-        <span class="font-display">土地详情 <span class="text-sm opacity-50">#{{ land?.id }}</span></span>
-      </template>
-
-      <!-- 作物信息（老版地块气泡对齐 + 成熟后每季收获收益） -->
-      <template v-if="hasCrop && land">
-        <div class="land-crop-head">
-          <img v-if="land.plantImage || land.seedImage" :src="land.plantImage || land.seedImage" alt="" class="land-crop-thumb">
-          <span v-else class="land-crop-thumb-fallback i-carbon-sprout" aria-hidden="true" />
-          <div class="land-crop-title">
-            <strong>{{ land.plantName || '未种植' }}</strong>
-            <span class="land-crop-status">{{ statusLabel }}</span>
-          </div>
-        </div>
-
-        <div class="land-crop-grid">
-          <div class="land-crop-cell">
-            <small>成熟倒计时</small>
-            <strong>{{ Number(land.matureInSec) > 0 ? formatTime(Number(land.matureInSec)) : '—' }}</strong>
-          </div>
-          <div class="land-crop-cell">
-            <small>生长季数</small>
-            <strong>{{ land.totalSeason > 0 ? `${land.currentSeason}/${land.totalSeason}` : '—' }}</strong>
-          </div>
-          <div class="land-crop-cell">
-            <small>每季经验</small>
-            <strong class="land-crop-exp">+{{ Number(land.harvestExpPerSeason) || 0 }}</strong>
-          </div>
-          <div class="land-crop-cell">
-            <small>每季金币</small>
-            <strong class="land-crop-gold">+{{ (Number(land.harvestGoldPerSeason) || 0).toLocaleString('zh-CN') }}</strong>
-          </div>
-        </div>
-
-        <div v-if="phaseProgress" class="land-crop-phase">
-          <div class="flex items-center justify-between gap-2 text-[11px]">
-            <span class="truncate text-emerald-700 font-medium dark:text-emerald-300">
-              {{ land.phaseName || '当前阶段' }}
-            </span>
-            <span class="shrink-0 text-emerald-600 tabular-nums font-semibold dark:text-emerald-300">
-              {{ phaseProgress.percent }}%
-            </span>
-          </div>
-          <div class="mt-1.5 h-1.5 overflow-hidden rounded-full bg-emerald-100 dark:bg-emerald-900/60">
-            <div class="land-crop-phase-fill" :style="{ width: `${phaseProgress.percent}%` }" />
-          </div>
-          <div v-if="phaseProgress.duration > 0" class="mt-1 flex justify-between text-[10px] text-gray-400 tabular-nums">
-            <span>已进行 {{ formatTime(phaseProgress.elapsed) }}</span>
-            <span>本阶段 {{ formatTime(phaseProgress.duration) }}</span>
-          </div>
-        </div>
-
-        <div v-if="mutantEffects.length" class="land-crop-mutants">
-          <div class="land-crop-mutants-title">
-            变异效果
-          </div>
-          <div class="flex flex-wrap gap-1.5">
-            <span v-for="effect in mutantEffects" :key="`mut-${effect.id}-${effect.icon}`" class="land-mutant-chip">
-              <img v-if="effect.image" :src="effect.image" alt="" class="h-4 w-4 object-contain">
-              <span class="font-medium">{{ effect.name }}</span>
-              <span v-if="effect.tag && effect.tag !== '无'" class="text-[10px] text-pink-400">· {{ effect.tag }}</span>
-            </span>
-          </div>
-          <div v-if="mutantEffects.some((effect: any) => effect.detail)" class="land-mutant-desc">
-            <div v-for="effect in mutantEffects" :key="`mut-desc-${effect.id}-${effect.icon}`">
-              {{ effect.detail || effect.name }}
+  <Teleport to="body">
+    <div v-if="land" class="land-detail-layer" @click.self="emit('close')">
+      <div class="land-detail-bubble" role="dialog" aria-modal="true" aria-label="土地等级与升级条件">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <div class="text-[10px] text-gray-400">
+              土地 #{{ land.id }}
+            </div>
+            <div class="truncate text-sm text-gray-900 font-bold dark:text-gray-100">
+              土地等级 / 升级条件
             </div>
           </div>
+          <button type="button" class="bubble-close" aria-label="关闭土地等级详情" @click="emit('close')">
+            <span class="i-carbon-close" />
+          </button>
         </div>
 
-        <div v-if="land.needWater || land.needWeed || land.needBug" class="land-crop-flags">
-          <span v-if="land.needWater" class="rounded-full bg-blue-100 px-2 py-0.5 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">需要浇水</span>
-          <span v-if="land.needWeed" class="rounded-full bg-green-100 px-2 py-0.5 text-green-700 dark:bg-green-900/40 dark:text-green-300">需要除草</span>
-          <span v-if="land.needBug" class="rounded-full bg-red-100 px-2 py-0.5 text-red-700 dark:bg-red-900/40 dark:text-red-300">需要除虫</span>
-        </div>
-
-        <div class="land-crop-actions">
-          <NButton size="small" type="primary" ghost :disabled="!canRipen" title="仅催熟该地块：普通肥一次，再连续施有机肥至成熟或无法继续" @click="emit('fertilize')">
-            <template #icon>
-              <span class="i-carbon-growth" />
-            </template>
-            催熟
-          </NButton>
-          <NButton size="small" type="error" ghost :disabled="!canRemove" @click="emit('remove')">
-            <template #icon>
-              <span class="i-carbon-trash-can" />
-            </template>
-            铲除
-          </NButton>
-        </div>
-      </template>
-
-      <template v-if="info">
-        <div class="land-detail-levels" :class="{ 'land-detail-levels--compare': info.next && info.current }">
-          <div v-if="info.current" class="land-detail-soil">
-            <img :src="info.current.image" :alt="info.current.name" width="84" height="70">
-            <strong>{{ info.current.name }}</strong>
-          </div>
-          <span v-if="info.next && info.current" class="i-carbon-chevron-right text-2xl opacity-40" aria-hidden="true" />
-          <div v-if="info.next" class="land-detail-soil">
-            <img :src="info.next.image" :alt="info.next.name" width="84" height="70">
-            <strong>{{ info.next.name }}</strong>
-          </div>
-        </div>
-        <table class="land-detail-metrics">
-          <thead>
-            <tr>
-              <th>土地加成</th><th>{{ info.current ? '当前' : '解锁后' }}</th><th v-if="info.current && info.next">
-                升级后
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="row in metrics" :key="row.key">
-              <th>{{ row.label }}</th>
-              <td>{{ metric(info.current || info.next, row.key, row.unit) }}</td>
-              <td v-if="info.current && info.next" :class="{ 'land-detail-improved': info.next[row.key] > info.current[row.key] }">
-                {{ metric(info.next, row.key, row.unit) }}<span v-if="info.next[row.key] > info.current[row.key]" aria-label="提升"> ↑</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-if="info.mode === 'max'" class="land-detail-max">
-          当前已满级
-        </div>
-        <section v-else class="land-detail-requirements">
-          <h3>{{ info.mode === 'unlock' ? '解锁条件' : '升级条件' }}</h3>
-          <div v-if="info.needLevel !== null" class="land-detail-condition">
-            <span>种植等级达到 {{ info.needLevel }} 级</span>
-            <strong :class="levelMet ? 'land-detail-improved' : 'land-detail-missing'">{{ connected ? player?.level ?? '—' : '—' }} / {{ info.needLevel }}</strong>
-          </div>
-          <div v-if="info.prerequisite" class="land-detail-condition">
-            <span>解锁第 {{ info.prerequisite.landId }} 块土地</span>
-            <strong :class="info.prerequisite.met ? 'land-detail-improved' : 'land-detail-missing'">{{ info.prerequisite.met ? '已满足' : '未满足' }}</strong>
-          </div>
-          <div v-if="info.precedingLands" class="land-detail-condition">
-            <span>{{ info.precedingLands.name }}及以上达到 {{ info.precedingLands.required }} 块</span>
-            <strong :class="info.precedingLands.met === true ? 'land-detail-improved' : 'land-detail-missing'">{{ info.precedingLands.owned ?? '—' }} / {{ info.precedingLands.required }}</strong>
-          </div>
-          <div v-if="info.current && info.next" class="land-detail-condition">
-            <span>当前地块为{{ info.current.name }}</span><span class="land-detail-improved">已满足</span>
-          </div>
-          <div v-for="cost in costs" :key="cost.id" class="land-detail-cost">
-            <div class="land-detail-cost-name">
-              <img v-if="cost.image" :src="cost.image" alt="" width="28" height="28"><span>{{ cost.name }}</span>
+        <template v-if="info">
+          <div class="land-detail-levels mt-2" :class="{ 'land-detail-levels--compare': info.next && info.current }">
+            <div v-if="info.current" class="bubble-cell land-detail-soil">
+              <img :src="info.current.image" :alt="info.current.name" width="44" height="36">
+              <strong class="text-[10px] font-semibold">{{ info.current.name }}</strong>
             </div>
-            <div class="land-detail-cost-amount">
-              <strong>{{ format(cost.count) }}</strong><span :class="cost.missing === 0n ? 'land-detail-improved' : 'land-detail-missing'">{{ cost.missing === null ? '余额待同步' : cost.missing > 0n ? `还差 ${format(cost.missing)}` : '余额充足' }}</span>
+            <span v-if="info.next && info.current" class="i-carbon-chevron-right text-sm opacity-40" aria-hidden="true" />
+            <div v-if="info.next" class="bubble-cell land-detail-soil">
+              <img :src="info.next.image" :alt="info.next.name" width="44" height="36">
+              <strong class="text-[10px] font-semibold">{{ info.next.name }}</strong>
             </div>
           </div>
-          <p v-if="info.unknown" class="land-detail-missing">
-            部分条件暂未获取
-          </p>
-          <p v-else-if="info.serverAllowed && connected" class="land-detail-improved">
-            当前可{{ info.mode === 'unlock' ? '解锁' : '升级' }}
-          </p>
-        </section>
-      </template>
-      <p v-else-if="!hasCrop">
-        土地详情暂未获取，请刷新农场。
-      </p>
-    </NCard>
-  </NModal>
+
+          <div class="bubble-cell mt-2">
+            <table class="land-detail-metrics">
+              <thead>
+                <tr class="text-[10px] text-gray-400">
+                  <th>土地加成</th><th>{{ info.current ? '当前' : '解锁后' }}</th><th v-if="info.current && info.next">
+                    升级后
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in metrics" :key="row.key" class="text-[11px]">
+                  <th class="text-[10px] text-gray-500 font-medium dark:text-gray-400">
+                    {{ row.label }}
+                  </th>
+                  <td class="tabular-nums font-semibold">
+                    {{ metric(info.current || info.next, row.key, row.unit) }}
+                  </td>
+                  <td v-if="info.current && info.next" class="tabular-nums font-semibold" :class="{ 'land-detail-improved': info.next[row.key] > info.current[row.key] }">
+                    {{ metric(info.next, row.key, row.unit) }}<span v-if="info.next[row.key] > info.current[row.key]" class="text-emerald-600" aria-label="提升"> ↑</span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div v-if="info.mode === 'max'" class="mt-2 rounded-lg bg-emerald-50 px-2 py-1.5 text-center text-[10px] text-emerald-700 font-semibold dark:bg-emerald-950/30 dark:text-emerald-300">
+            当前已满级
+          </div>
+          <section v-else class="bubble-cell land-detail-requirements mt-2">
+            <h3 class="mb-1 text-[10px] text-gray-400 font-semibold">
+              {{ info.mode === 'unlock' ? '解锁条件' : '升级条件' }}
+            </h3>
+            <div v-if="info.needLevel !== null" class="land-detail-condition">
+              <span>种植等级达到 {{ info.needLevel }} 级</span>
+              <strong :class="levelMet ? 'land-detail-improved' : 'land-detail-missing'">{{ connected ? player?.level ?? '—' : '—' }} / {{ info.needLevel }}</strong>
+            </div>
+            <div v-if="info.prerequisite" class="land-detail-condition">
+              <span>解锁第 {{ info.prerequisite.landId }} 块土地</span>
+              <strong :class="info.prerequisite.met ? 'land-detail-improved' : 'land-detail-missing'">{{ info.prerequisite.met ? '已满足' : '未满足' }}</strong>
+            </div>
+            <div v-if="info.precedingLands" class="land-detail-condition">
+              <span>{{ info.precedingLands.name }}及以上达到 {{ info.precedingLands.required }} 块</span>
+              <strong :class="info.precedingLands.met === true ? 'land-detail-improved' : 'land-detail-missing'">{{ info.precedingLands.owned ?? '—' }} / {{ info.precedingLands.required }}</strong>
+            </div>
+            <div v-if="info.current && info.next" class="land-detail-condition">
+              <span>当前地块为{{ info.current.name }}</span><strong class="land-detail-improved">已满足</strong>
+            </div>
+            <div v-for="cost in costs" :key="cost.id" class="land-detail-cost">
+              <div class="min-w-0 flex items-center gap-1.5">
+                <img v-if="cost.image" :src="cost.image" alt="" width="20" height="20" class="h-5 w-5 object-contain"><span class="truncate">{{ cost.name }}</span>
+              </div>
+              <div class="shrink-0 text-right tabular-nums">
+                <strong class="text-[11px]">{{ format(cost.count) }}</strong><span class="ml-1 text-[10px]" :class="cost.missing === 0n ? 'land-detail-improved' : 'land-detail-missing'">{{ cost.missing === null ? '余额待同步' : cost.missing > 0n ? `还差 ${format(cost.missing)}` : '余额充足' }}</span>
+              </div>
+            </div>
+            <p v-if="info.unknown" class="land-detail-missing mt-1.5 text-[10px]">
+              部分条件暂未获取
+            </p>
+            <p v-else-if="info.serverAllowed && connected" class="land-detail-improved mt-1.5 text-[10px]">
+              当前可{{ info.mode === 'unlock' ? '解锁' : '升级' }}
+            </p>
+          </section>
+        </template>
+        <p v-else class="mt-2 text-[11px] text-gray-400">
+          土地详情暂未获取，请刷新农场。
+        </p>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
-.land-detail-modal {
-  width: min(480px, calc(100vw - 24px));
-  max-height: calc(100dvh - 32px);
-  overflow-y: auto;
-  border-radius: 20px;
+/* 尺寸与设计 token 与 LandCropBubble.vue 的 .land-bubble 逐项对齐；
+   二级只多一层用于点击外部关闭的居中浮层，卡片本身是同一套视觉。 */
+.land-detail-layer {
+  position: fixed;
+  z-index: 1001;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  background: rgb(15 23 42 / 0.18);
 }
 
-/* ===== 作物信息 ===== */
-.land-crop-head {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 2px 0 12px;
-}
-.land-crop-thumb {
-  width: 56px;
-  height: 56px;
-  object-fit: contain;
+.land-detail-bubble {
+  width: min(260px, calc(100vw - 32px));
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  padding: 12px;
+  border: 1px solid rgb(226 232 240);
   border-radius: 12px;
-  background: rgba(69, 155, 93, 0.08);
+  background: rgb(255 255 255 / 0.98);
+  color: #334155;
+  text-align: left;
+  box-shadow: 0 14px 32px rgb(15 23 42 / 0.24);
 }
-.land-crop-thumb-fallback {
-  display: grid;
-  place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 12px;
-  background: rgba(69, 155, 93, 0.08);
-  font-size: 26px;
-  color: #278452;
+
+.bubble-cell {
+  border-radius: 8px;
+  background: rgb(249 250 251 / 1);
+  padding: 8px;
 }
-.land-crop-title {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.land-crop-status {
-  align-self: flex-start;
-  padding: 1px 10px;
-  border-radius: 999px;
-  background: rgba(69, 155, 93, 0.14);
-  color: #278452;
-  font-size: 12px;
-  font-weight: var(--fw-600);
-}
-.land-crop-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
-  margin-bottom: 12px;
-}
-.land-crop-cell {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 6px;
-  border-radius: 10px;
-  background: rgba(127, 127, 127, 0.07);
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-}
-.land-crop-cell small {
-  font-size: 11px;
-  opacity: 0.65;
-}
-.land-crop-exp {
-  color: #2f7ed8;
-}
-.land-crop-gold {
-  color: #c8871a;
-}
-.land-crop-phase {
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: rgba(69, 155, 93, 0.08);
-}
-.land-crop-phase-fill {
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #459b5d, #6cc07f);
-  transition: width 0.4s ease;
-}
-.land-crop-mutants {
-  margin-top: 12px;
-}
-.land-crop-mutants-title {
-  margin-bottom: 6px;
-  font-size: 12px;
-  font-weight: var(--fw-600);
-  opacity: 0.7;
-}
-.land-mutant-chip {
+
+.bubble-close {
   display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: none;
   align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: rgba(192, 113, 56, 0.12);
-  color: #a05a22;
+  justify-content: center;
+  border-radius: 6px;
+  color: #94a3b8;
   font-size: 12px;
 }
-.land-mutant-desc {
-  margin-top: 6px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: rgba(127, 127, 127, 0.06);
-  color: var(--ui-muted, #888);
-  font-size: 12px;
-  line-height: 1.7;
-}
-.land-crop-flags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 12px;
-}
-.land-crop-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 14px;
+
+.bubble-close:hover {
+  background: rgb(241 245 249 / 1);
+  color: #334155;
 }
 
 .land-detail-levels {
   display: grid;
   justify-content: center;
   align-items: center;
-  gap: 12px;
-  padding: 16px 0 18px;
+  gap: 6px;
 }
+
 .land-detail-levels--compare {
   grid-template-columns: 1fr auto 1fr;
 }
+
 .land-detail-soil {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  text-align: center;
 }
+
 .land-detail-soil img {
   object-fit: contain;
 }
+
+.land-detail-soil strong {
+  line-height: 1.2;
+}
+
 .land-detail-metrics {
   width: 100%;
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
 }
+
 .land-detail-metrics th,
 .land-detail-metrics td {
-  padding: 9px 4px;
+  padding: 3px 2px;
   text-align: right;
+  white-space: nowrap;
 }
+
 .land-detail-metrics th:first-child {
   text-align: left;
-  font-weight: var(--fw-500);
-  opacity: 0.7;
 }
-.land-detail-metrics thead {
-  font-size: 12px;
-  border-bottom: 1px solid var(--n-border-color);
-  opacity: 0.65;
+
+.land-detail-metrics thead th {
+  padding-bottom: 5px;
+  border-bottom: 1px solid rgb(226 232 240);
 }
-.land-detail-requirements {
-  margin-top: 16px;
-  padding-top: 16px;
-  border-top: 1px solid var(--n-border-color);
-}
-.land-detail-requirements h3 {
-  margin: 0 0 12px;
-  font-weight: var(--fw-700);
-}
+
 .land-detail-condition {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  margin: 8px 0;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 5px;
+  color: #64748b;
+  font-size: 10px;
 }
+
+.land-detail-condition strong {
+  flex: none;
+  font-size: 10px;
+}
+
 .land-detail-cost {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-top: 12px;
+  gap: 6px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed rgb(226 232 240);
+  font-size: 11px;
 }
-.land-detail-cost-name {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.land-detail-cost-name img {
-  object-fit: contain;
-}
-.land-detail-cost-amount {
-  display: flex;
-  flex-direction: column;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.land-detail-cost-amount span {
-  font-size: 12px;
-}
+
 .land-detail-improved {
-  color: var(--n-color-target, #278452);
+  color: #059669;
 }
+
 .land-detail-missing {
   color: #c87138;
 }
-.land-detail-max {
-  margin-top: 20px;
-  padding: 10px;
-  text-align: center;
-  border-radius: 12px;
-  background: rgba(69, 155, 93, 0.12);
-  color: #278452;
-  font-weight: var(--fw-600);
+
+:global(.dark) .land-detail-layer {
+  background: rgb(2 6 23 / 0.5);
 }
+
+:global(.dark) .land-detail-bubble {
+  border-color: #475569;
+  background: rgb(31 41 55 / 0.98);
+  color: #e5e7eb;
+}
+
+:global(.dark) .bubble-cell {
+  background: rgb(15 23 42 / 0.6);
+}
+
+:global(.dark) .bubble-close:hover {
+  background: rgb(51 65 85 / 1);
+  color: #e5e7eb;
+}
+
+:global(.dark) .land-detail-metrics thead th {
+  border-bottom-color: #475569;
+}
+
+:global(.dark) .land-detail-condition {
+  color: #94a3b8;
+}
+
+:global(.dark) .land-detail-cost {
+  border-top-color: #475569;
+}
+
+:global(.dark) .land-detail-improved {
+  color: #34d399;
+}
+
+:global(.dark) .land-detail-missing {
+  color: #fb923c;
+}
+
+@media (max-width: 640px) {
+  .land-detail-bubble {
+    width: min(260px, calc(100vw - 24px));
+  }
+}
+
 @media (max-width: 360px) {
   .land-detail-metrics th,
   .land-detail-metrics td {
-    padding: 8px 2px;
-  }
-  .land-detail-modal {
-    font-size: 13px;
-  }
-  .land-crop-grid {
-    grid-template-columns: repeat(2, 1fr);
+    padding: 3px 1px;
   }
 }
 </style>
