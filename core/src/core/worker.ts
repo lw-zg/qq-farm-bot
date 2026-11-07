@@ -525,6 +525,19 @@ function runMysteryShopTick(): Promise<void> {
     } = require('../services/mystery-shop-auto');
     if (!isMysteryShopWatchEnabled(getAutomation())) return Promise.resolve();
     return checkMysteryShopTick().then((result: any) => {
+        // 面板内消息（局内通知）：本地落盘即可，不依赖外部推送渠道；写失败不影响外部提醒。
+        if (result?.event) {
+            try {
+                require('../services/panel-notification').appendPanelNotification(
+                    String(process.env.FARM_ACCOUNT_ID || ''),
+                    result.event,
+                );
+            } catch (e: any) {
+                logWarn('商城', `面板消息写入失败: ${e.message}`, {
+                    module: 'shop', event: '面板消息', result: 'error', error: e.message,
+                });
+            }
+        }
         if (result?.push?.title && result?.push?.content) {
             sendToMaster({ type: 'push_notify', title: result.push.title, content: result.push.content });
         }
@@ -579,7 +592,7 @@ function applyRuntimeConfig(snapshot: any, syncNow: boolean = false): number {
     // 资本模式配置变更（关闭/换狗）时收回自动派出的宠物。
     try {
         require('../services/capital-mode').reconcileConfigChange(prevCapitalMode, getCapitalMode()).catch(() => null);
-    } catch (_e: any) {
+    } catch {
         // capital-mode 未初始化时忽略
     }
 
@@ -625,16 +638,11 @@ function applyRuntimeConfig(snapshot: any, syncNow: boolean = false): number {
             startActivityAutomationTimer();
             startPetFeedCheckTimer();
 
-            // 对齐老版 mystery_shop_auto_buy_after_save：神秘商店相关开关/预算变化且已开启时，
+            // 对齐老版 mystery_shop_auto_buy_after_save：神秘商人相关开关变化且巡查已启用时，
             // 保存后 2 秒立即巡查一次，不用等下一个 10 分钟周期。
-            const mysteryKeys = [
-                'mystery_shop_auto_buy',
-                'mystery_shop_allow_gold',
-                'mystery_shop_allow_coupon',
-                'mystery_shop_allow_gold_bean',
-            ];
-            const mysteryChanged = mysteryKeys.some(key => (prevAuto && prevAuto[key]) !== (getAutomation() as any)?.[key]);
-            if ((getAutomation() as any)?.mystery_shop_auto_buy && mysteryChanged) {
+            // 用服务侧的键表，避免新增货币 / 通知开关后这里漏配（钻石、到货提醒、购买通知曾遗漏）。
+            const { isMysteryShopWatchEnabled, mysteryShopConfigChanged } = require('../services/mystery-shop-auto');
+            if (isMysteryShopWatchEnabled(nextAuto) && mysteryShopConfigChanged(prevAuto, nextAuto)) {
                 workerScheduler.setTimeoutTask('mystery_shop_after_save', 2000, () => {
                     if (!loginReady) return;
                     runExclusiveAutomationTask('mystery_shop', runMysteryShopTick).catch(() => null);
@@ -649,7 +657,7 @@ function applyRuntimeConfig(snapshot: any, syncNow: boolean = false): number {
                 resetCooldownsForEnabledKeys(Object.keys(nextAutoAll)
                     .filter(key => nextAutoAll[key] === true && !(prevAuto && prevAuto[key] === true)));
                 scheduleActivityAutomationAfterSave(workerScheduler);
-            } catch (_e: any) {
+            } catch {
                 // 活动自动化未初始化时忽略
             }
 
@@ -1100,7 +1108,7 @@ async function handleApiCall(msg: any): Promise<void> {
                 // 手动派出：释放资本模式的自动召回所有权。
                 try {
                     require('../services/capital-mode').releaseForManualCommand();
-                } catch (_e: any) {
+                } catch {
                     // capital-mode 未初始化时忽略
                 }
                 result = await require('../services/pets').deployDog(args[0]);
@@ -1320,7 +1328,8 @@ async function handleApiCall(msg: any): Promise<void> {
                 result = await require('../services/commerce').getMysteryShop();
                 break;
             case 'purchaseMysteryOffer':
-                result = await require('../services/commerce').purchaseMysteryOffer(args[0]);
+                // 后台 API 只可能是页面手动购买；自动购买由 mystery-shop-auto 内部标记 'auto'。
+                result = await require('../services/commerce').purchaseMysteryOffer(args[0], 'manual');
                 break;
             case 'getSchedulers':
                 result = getSchedulerRegistrySnapshot();

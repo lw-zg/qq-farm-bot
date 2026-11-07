@@ -124,10 +124,16 @@ function summaryTags(key: ModuleKey) {
       automation.value.automation.mystery_shop_allow_gold && '金币',
       automation.value.automation.mystery_shop_allow_coupon && '点券',
       automation.value.automation.mystery_shop_allow_gold_bean && '金豆豆',
+      automation.value.automation.mystery_shop_allow_diamond && '钻石',
+    ].filter(Boolean)
+    const notify = [
+      automation.value.automation.mystery_shop_arrival_notify && '到货提醒',
+      automation.value.automation.mystery_shop_purchase_notify && '购买通知',
     ].filter(Boolean)
     return [
       automation.value.automation.mystery_shop_auto_buy ? '自动购买' : '未开启购买',
       currencies.join('、') || '未选货币',
+      notify.join('、') || '未开启提醒',
     ]
   }
   if (key === 'pet') {
@@ -157,7 +163,7 @@ function moduleEnabled(key: ModuleKey) {
   if (key === 'steal')
     return automation.value.automation.friend && automation.value.automation.friend_steal
   if (key === 'merchant')
-    return automation.value.automation.mystery_shop_auto_buy
+    return automation.value.automation.mystery_shop_auto_buy || automation.value.automation.mystery_shop_arrival_notify
   if (key === 'pet')
     return automation.value.automation.pet_feed_dog_food
   return activityEnabledCount.value > 0 || automation.value.automation.task || automation.value.automation.task_after_farm
@@ -186,6 +192,10 @@ function setModuleEnabled(key: ModuleKey, enabled: boolean) {
   }
   else if (key === 'merchant') {
     automation.value.automation.mystery_shop_auto_buy = enabled
+    if (!enabled) {
+      automation.value.automation.mystery_shop_arrival_notify = false
+      automation.value.automation.mystery_shop_purchase_notify = false
+    }
   }
   else if (key === 'pet') {
     automation.value.automation.pet_feed_dog_food = enabled
@@ -505,11 +515,26 @@ function cancel() {
                   <div class="mb-2 text-sm text-gray-700 font-medium dark:text-gray-300">
                     允许使用的货币
                   </div>
-                  <div class="grid gap-3 sm:grid-cols-3">
+                  <div class="grid gap-3 lg:grid-cols-4 sm:grid-cols-2">
                     <BaseSwitch v-model="automation.automation.mystery_shop_allow_gold" label="金币" />
                     <BaseSwitch v-model="automation.automation.mystery_shop_allow_coupon" label="点券" />
                     <BaseSwitch v-model="automation.automation.mystery_shop_allow_gold_bean" label="金豆豆" />
+                    <BaseSwitch v-model="automation.automation.mystery_shop_allow_diamond" label="钻石" />
                   </div>
+                </div>
+              </section>
+              <section class="border border-gray-100 rounded-lg p-4 space-y-3 dark:border-gray-700">
+                <div>
+                  <div class="mb-2 text-sm text-gray-700 font-medium dark:text-gray-300">
+                    消息与外部推送
+                  </div>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <BaseSwitch v-model="automation.automation.mystery_shop_arrival_notify" label="到货提醒" />
+                    <BaseSwitch v-model="automation.automation.mystery_shop_purchase_notify" label="购买通知" />
+                  </div>
+                  <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                    神秘商人到货、自动购买成功都会记入顶栏「消息」，无需配置任何推送渠道。下面两个开关控制是否额外推送到外部渠道（渠道在「设置 → 下线提醒」配置）：到货提醒单独开启也会启动每 10 分钟巡查；购买通知需配合自动购买，仅在买成功后推送。
+                  </p>
                 </div>
               </section>
             </div>

@@ -30,6 +30,47 @@ flowchart TB
 ```
 
 ## 详细记录
+### 2026-11-07 · 运行日志筛选手机端显示完整 + 神秘商人页签移到第 4 + 催熟时间核查
+
+- **首页运行日志「所有事件」按钮手机端显示不全**：`.dashboard-log-toolbar` 手机端是 `minmax(0, 1fr) minmax(0, 1fr) 32px` 三列，两个下拉各只分到约 140px，还要给常驻的 32px 重置按钮列让位，选中标签（「所有事件」以及较长的事件名）会被省略号截断。改为两列 `minmax(0, 1fr) 32px` + 显式 `grid-row` 重排：搜索独占第 1 行整宽、模块筛选与重置按钮第 2 行、**事件筛选独占第 3 行整行宽度**。两个 `BaseSelect` 各包一层带 class 的容器以便栅格定位；PC 端（`@container runtime-log (min-width: 640px)`）仍是一行四列，完全不变。手机端工具栏只比原来多一行。
+- **农场商城页签**：`GameMall.vue` 的 tabs 顺序把「神秘商人」从第 5 位移到**第 4 位**（游戏商城 → 限时商店 → 道具商店 → 神秘商人 → SVIP 专属商城）。`activeTab` 白名单、`MysteryShopPanel` 绑定与默认页签逻辑均不变。
+- **催熟时间核查**（只调研，未改代码）：
+  - 2×2 催熟**没有独立计时器**，挂在 farm 巡查班次上；每轮在 `farmMin~farmMax` 之间随机取整数秒，默认 **20~25 秒**，可在「策略与巡查间隔」里改；开关由关变开时额外 **600ms** 后立即跑一轮。
+  - 施肥动作间隔全是随机：有机肥循环每次请求后 `randomDelay(1000, 1500)`（**1~1.5 秒**）；「催熟全部」每批之间 `600~1200ms`、状态刷新重试 `300~500ms`；多地块批量请求之间固定 `sleep(50)` = 50ms。
+  - 上限：有机肥循环 `min(240, 地块数×20)` 次，前端单地块催熟有机循环 100 次，「催熟全部」预览有效期 60 秒且每步成功续期 60 秒。
+  - **「催熟掉多少成熟时间」不是固定值、也不由 bot 决定**：按服务器返回的 `plant.phases` 各阶段 `begin_time` 差值（剩余秒数）计算，化肥消耗以秒计，前端 `fertilizerHours()` 换算成小时展示；普通肥一次推进一个阶段（受 `leftInorcFertTimes` 限制），有机肥循环推进到成熟。
+- 新增 `web/tests/log-filter-mobile.test.mjs` 3 项、`web/tests/mall-tab-order.test.mjs` 2 项静态断言，均做过反向验证（改回旧三列 / 改回旧页签顺序各 fail 1）。
+- 验证：web **82/82**、core **375/375**、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。仍无浏览器/真机，手机端为静态断言 + 构建验证，没有截图。
+
+### 2026-11-07 · 新增面板内消息（局内通知）：顶栏铃铛 + 本地持久化
+
+- **口径澄清**：用户说的「购买通知」是**面板内就能看到的局内消息**，不是 Bark / 钉钉 / Webhook 外部推送。复查工作区三个老版本：`qq-farm-bot-404` / `_merge_src/dawn` 的设置页 `AutomationSettingsForm.vue` 有「到货提醒 / 购买提醒」开关，但代码明确走 `push_notify → sendConfiguredPush → Pushoo` 外部渠道；`legacy-...bundle` 旧版只有购买后的页面 toast 与购买历史。三个版本都没有独立通知中心。因此上一轮补的两个开关属于外部推送，本轮新建真正的局内消息能力。
+- **后端**：新增 `core/src/services/panel-notification.ts`，每账号一个 `data/panel_notifications/<id>.json`，保留最近 100 条；按 `dedupeKey` 去重，避免 10 分钟一轮的巡查反复刷同一条到货消息；损坏文件 / 空内容安全降级。新增 `GET /api/panel-notifications` + provider + 路由注册，读取失败只返回空列表、不打断面板。
+- **事件与开关解耦**：`checkMysteryShopTick` 现在始终返回 `event`（到货或自动购买成功，`mystery_arrival` / `mystery_purchase`），worker 本地落盘，**不需要任何提醒开关、也不需要配置外部推送渠道**；两个提醒开关改为只控制是否额外发外部推送。功能模块神秘商人区标题改「消息与外部推送」，说明里写清「到货、自动购买成功都会记入顶栏「消息」」。
+- **前端**：新增 `web/src/stores/panel-notifications.ts`（按账号读取、未读数用 localStorage 的已读时间算，避免 worker 与主进程同时改同一文件）与 `PanelNotificationBell.vue`（顶栏铃铛、未读红点、Teleport 下拉、时间/标题/多行内容、空态、展开即已读、30 秒轮询、切账号刷新、卸载清理定时器），挂到 `DefaultLayout.vue` 顶栏操作区。
+- 新增 `core/tests/panel-notification.test.js` 5 项（账号隔离 / 去重 / 100 条 / 损坏文件 / 链路）+ `mystery-shop-switches.test.js` 1 项行为测试（提醒开关全关时 `push` 为空但 `event` 仍在），`web/tests/panel-notifications.test.mjs` 3 项（铃铛挂载 / 面板展示 / store 行为）；更新既有 `mystery-shop-notify.test.mjs` 的文案断言。web 断言已反向验证（移除铃铛时 fail 1）。
+- 验证：core **375/375**、web **77/77**、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。仍无浏览器/真机截图，纯静态断言 + 构建验证。
+
+### 2026-11-07 · 补齐神秘商人「到货提醒 / 购买通知」开关与保存后立即巡查
+
+- **背景**：上一轮验证自动化开关时提到「购买通知」是附属开关，但复查发现这两个键（`mystery_shop_arrival_notify` / `mystery_shop_purchase_notify`）虽然后端链路完整、默认值与类型都在，**前端任何页面都没有开关控件**——功能模块「神秘商人」只有 4 个货币开关和模块总开关，`Settings.vue` 里也只是默认值。等于这两个开关永远为 `false`，通知从未真正发出过。
+- **后端链路（已存在，本轮确认）**：`mystery-shop-auto.ts` 的 `decideMysteryShopTick` / `resolveMysteryShopPushFlags` / `buildMysteryShopPush` 生成「神秘商人到货」「神秘商人已自动购买」消息 → `worker.ts` 的 `sendToMaster({ type: 'push_notify' })` → `worker-manager.ts` → `sendConfiguredPush` → `sendPushooMessage`。推送渠道与「设置 → 下线提醒」共用一套配置（`getOfflineReminder()`），**未配置渠道时只记日志、不会真正发出**。到货提醒本身会启动巡查（`isMysteryShopWatchEnabled` 认它），购买通知只在自动购买成功后才可能推送。
+- **补齐前端**：功能模块神秘商人区新增「事件提醒」section，两个 `BaseSwitch` 绑定这两个键并附说明；模块摘要增加「到货提醒 / 购买通知 / 未开启提醒」；`moduleEnabled('merchant')` 改为 `auto_buy || arrival_notify`（只开到货提醒时模块也显示启用），关闭模块总开关时同步清掉两个提醒开关，避免状态自相矛盾。
+- **修 worker 遗漏**：`applyRuntimeConfig` 里手写的 `mysteryKeys` 只列了 `auto_buy` + 3 个货币键，漏了钻石与两个通知键，且立即巡查条件写死 `mystery_shop_auto_buy` 为真——只开到货提醒或只改通知开关时，保存配置后要干等下一个 10 分钟周期。改用服务侧已有的 `mysteryShopConfigChanged(prevAuto, nextAuto)`（键表 7 个，新增开关自动覆盖）+ `isMysteryShopWatchEnabled(nextAuto)`，保存后 2 秒立即巡查。
+- 新增 `core/tests/mystery-shop-switches.test.js` 2 项（真实生成推送内容、去重与开关关闭；7 键变更检测 + 推送链路静态断言）与 `web/tests/mystery-shop-notify.test.mjs` 3 项（开关 UI / 摘要与模块状态 / 配置类型）；web 断言已反向验证（改掉 label 时 fail 1）。
+- 验证：core **369/369**、web **74/74**、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。仍无浏览器/真机截图，纯静态断言 + 构建验证。
+
+### 2026-11-07 · 节令日历手机端可下滑 + 神秘商人购买历史回归 + 自动化开关验证
+
+- **节令日历手机端无法下滑**：活动详情外壳 `.farm-page-content.is-activity-detail` 是 `overflow:hidden` + 子元素 `flex:1/min-height:0`，滚动必须交给页面自身；`SolarCalendar.vue` 的 `.solar` 只有 `width/min-width`，内容超出视口后被裁掉。给 `.solar` 补 `min-height:0 / overflow-y:auto / overscroll-behavior:contain / -webkit-overflow-scrolling:touch`，PC 与手机端都由页面自身滚动。
+- **神秘商人「没有记录」判定：是 BUG，不是没买过**。老版本有 `mystery-shop-history.js` + `/api/shop/mystery/history` + 页面「购买历史」区块（空态「暂无购买记录，手动和自动购买都会记录在这里。」）；新版移植商城时整条链路都漏了，无论是否购买都不会有记录。按老版口径补齐：
+  - 新增 `core/src/services/mystery-shop-history.ts`：每账号一个 `data/mystery_shop_history/<id>.json`，保留最近 100 条，字段与老版一致。
+  - `commerce.purchaseMysteryOffer(npcId, source)` 购买成功后写记录；worker 后台 API 固定 `manual`、`mystery-shop-auto` 自动巡查固定 `auto`，写盘失败不影响购买结果。
+  - 新增 `GET /api/mystery-shop/history` 与 provider 读取；前端 `commerce` store 增加 `mysteryHistory` / `fetchMysteryHistory`（购买成功后自动刷新），`MysteryShopPanel.vue` 增加与商品卡同宽的「购买历史」区块（次数、按货币累计花费、时间、手动/自动、价格、折扣、空态、最近 100 条说明）。
+- **神秘商人自动化开关验证：生效**。链路为 功能模块开关 → `DEFAULT_ACCOUNT_CONFIG.automation`（白名单自动取 `Object.keys`）→ worker 登录后 10 秒首查 + 每 10 分钟巡查 + 改开关后 2 秒重查 → `decideMysteryShopTick` 判定总开关 / 货币 / 余额 → 购买。新增 `core/tests/mystery-shop-switches.test.js` 2 项可执行验证（开关组合与钻石货品、白名单 / 定时器 / UI 消费点）。发现并补上功能模块缺失的**钻石**货币开关（后端 `mystery_shop_allow_diamond` 早已支持、前端无入口，钻石货品永远跳过），货币栅格改为「手机 2 列 / PC 4 列」，模块摘要同步显示钻石。注意「购买通知」是附属开关，单独开启不会启动巡查，需配合自动购买或到货提醒。
+- 顺带用 ESLint 自动修复 `SolarCalendar.vue` 的 `defineEmits` 位置与 UnoCSS 类顺序，并清理 `worker.ts` 3 处既有 unused catch 绑定，使本轮改动文件 lint 全绿；均为等价改动。
+- 新增 `core/tests/mystery-shop-history.test.js` 4 项、`core/tests/mystery-shop-switches.test.js` 2 项、`web/tests/mystery-shop-history.test.mjs` 4 项。验证：core **367/367**、web **71/71**、`vue-tsc -b`、改动文件 ESLint、`vite build` 全部通过。仍无浏览器 / 真机截图，滚动与排版为静态断言 + 构建验证。
+
 ### 2026-11-06 · 功能模块「土地与施肥」2x2催熟开关间距
 
 - **问题**：`AccountFeatureSettings.vue` 施肥参数 section 里 `2x2催熟` 与 `多季补肥` 两个 `BaseSwitch` 都是 `display:inline-flex`，直接相邻时只靠模板换行产生的一个空白字符分隔，文字「2x2催熟」后面紧跟着下一个开关的旋钮，看起来挤在一起。
