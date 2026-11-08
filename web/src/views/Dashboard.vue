@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import api, { getApiErrorMessage } from '@/api'
 import LevelForecast from '@/components/LevelForecast.vue'
+import RuntimeDiagnosticsCard from '@/components/RuntimeDiagnosticsCard.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
@@ -491,7 +492,9 @@ const filteredOperations = computed(() => {
 const operationGroups = computed(() => partitionOperations(filteredOperations.value))
 
 // 当日新增金币/经验：后端以当日首次基线计算，跨重启与跨天均已处理。
-const todayGoldGained = computed(() => Math.max(0, Number(status.value?.sessionGoldGained) || 0))
+// 金币是净值（消费会扣减），消费高于收益时为负数，不能 clamp 到 0；
+// 负数按资产「本次运行金币」的负向色展示。经验只增不减，仍保持非负。
+const todayGoldGained = computed(() => Number(status.value?.sessionGoldGained) || 0)
 const todayExpGained = computed(() => Math.max(0, Number(status.value?.sessionExpGained) || 0))
 
 function getOpName(key: string | number) {
@@ -995,6 +998,9 @@ useIntervalFn(updateCountdowns, 1000)
           </div>
         </section>
 
+        <!-- 运行诊断：进程 / 队列 / 事件循环指标 -->
+        <RuntimeDiagnosticsCard />
+
         <!-- Operations Grid -->
         <div class="farm-card rounded-2xl bg-white p-5 shadow-md dark:bg-gray-800">
           <h3 class="mb-3 flex items-center justify-between gap-2 text-lg font-display font-medium">
@@ -1008,7 +1014,7 @@ useIntervalFn(updateCountdowns, 1000)
             description="启动账号后显示今日收获与互动统计"
             icon="i-carbon-connection-signal-off"
           />
-          <div v-else-if="!operationGroups.active.length && todayGoldGained <= 0 && todayExpGained <= 0" class="flex flex-col items-center justify-center gap-1 py-6 text-center">
+          <div v-else-if="!operationGroups.active.length && todayGoldGained === 0 && todayExpGained === 0" class="flex flex-col items-center justify-center gap-1 py-6 text-center">
             <span class="i-carbon-sprout text-3xl text-gray-300 dark:text-gray-600" />
             <strong class="text-sm text-gray-700 dark:text-gray-200">等待第一份收获</strong>
             <p class="text-xs text-gray-400">
@@ -1024,8 +1030,8 @@ useIntervalFn(updateCountdowns, 1000)
                     金币
                   </div>
                 </div>
-                <div class="text-sm font-bold 2xl:text-base">
-                  {{ todayGoldGained }}<small class="ml-0.5 text-[10px] text-gray-400 font-normal">次</small>
+                <div class="ov-today-gold text-sm font-bold 2xl:text-base" :class="{ 'is-down': todayGoldGained < 0 }">
+                  {{ todayGoldGained }}
                 </div>
               </div>
               <div class="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 transition-transform hover:scale-105 dark:bg-gray-700/30">
@@ -1036,7 +1042,7 @@ useIntervalFn(updateCountdowns, 1000)
                   </div>
                 </div>
                 <div class="text-sm font-bold 2xl:text-base">
-                  {{ todayExpGained }}<small class="ml-0.5 text-[10px] text-gray-400 font-normal">次</small>
+                  {{ todayExpGained }}
                 </div>
               </div>
             </div>
@@ -1059,7 +1065,7 @@ useIntervalFn(updateCountdowns, 1000)
                   </div>
                 </div>
                 <div class="text-sm font-bold 2xl:text-base">
-                  {{ val }}<small class="ml-0.5 text-[10px] text-gray-400 font-normal">次</small>
+                  {{ val }}
                 </div>
               </div>
             </div>
@@ -1498,6 +1504,11 @@ useIntervalFn(updateCountdowns, 1000)
 }
 
 .ov-tile__delta.is-down {
+  color: var(--ui-danger);
+}
+
+/* 今日统计金币净增为负时，与资产「本次运行金币」用同一个负向色。 */
+.ov-today-gold.is-down {
   color: var(--ui-danger);
 }
 

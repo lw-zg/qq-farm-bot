@@ -30,6 +30,38 @@ flowchart TB
 ```
 
 ## 详细记录
+### 2026-11-08 · 首页新增「运行诊断」模块（截图对照自建）
+
+- **现成代码核查**：按截图逐项检索本地三套源码、legacy bundle、`_preview` 旧产物，以及 `liyangpengs/qq-farm-bot` 的 master / `test_20260828` 全部分支与首页提交历史，均未发现「运行诊断 / 队列空闲 / 事件循环 P99」实现；上游首页只有运行日志、巡查倒计时、今日统计。因此不移植，改用项目已有的 `/api/scheduler` 调度器任务快照作数据源，其余完整自建。
+- **后端采集**：新增 `core/src/services/runtime-diagnostics.ts`（10 分钟滚动窗口、2 秒采样、200ms 事件循环探针）——CPU 区间平均按 `process.cpuUsage()` 差值 / CPU 核数换算、堆内存趋势、事件循环延迟 P99、当前排队 / 256 与峰值、近 10 分钟完成 / 失败 / 排队超时统计，自动判定「队列空闲 / 运行中 / 需要关注 / 队列积压」。`scheduler.ts` 在 `runTask` 用 `trackScheduledTask` 统一埋点（同步任务仍保持同步返回），`worker.ts` 的 `getSchedulers` 附带账号 Worker 进程读数。
+- **接口**：新增 `GET /api/runtime-diagnostics`（`runtime-diagnostics-routes.ts`），账号 Worker 读数 5 秒缓存避免首页轮询放大 IPC；采样器随 admin server 启动，定时器全部 `unref()` 不阻塞进程退出。
+- **前端卡片**：新增 `RuntimeDiagnosticsCard.vue`，按截图还原状态点 + 更新时间 + 2×2 指标（当前排队进度条 / CPU 区间平均 / 账号堆内存面积折线 / 事件循环 P99 实线与警戒虚线）+ 近 10 分钟汇总 + 「更多指标」展开 12 项辅助指标；10 秒自动刷新、请求序列竞态保护、错误重试；`Dashboard.vue` 右侧列挂在自动巡查与今日统计之间，手机端与暗色主题适配。
+- **测试与验证**：新增 core 15 项、web 12 项；core 413/413、web 113/113、`tsc`、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。环境无浏览器 / 真机，界面与配色为静态断言 + 构建验证；`vite build` 清空既有 `dist` 时被工作区批量删除保护拦截，移走旧产物后构建成功。
+
+### 2026-11-08 · 今日统计去掉单位「次」 + 账号管理 Code 过期自动监听与自动补码
+
+- **首页「今日统计」去掉数值后面的「次」**：金币、经验与各动作项三处 `<small>次</small>` 全部移除；数字、负数配色（`ov-today-gold.is-down`）与动作统计列表不变，运行日志「连续重复 N 次」文案不受影响。
+- **账号管理自动监听 Code 过期并补 Code**：
+  - 新增 `core/src/services/code-watch.ts`：微信按 `expires_at`（兼容秒/毫秒）、`wxCredentialRefreshedAt`、续期失败标记判定「即将过期 / 已过期 / 续期失败」；QQ 没有到期时间，按账号最新一条日志是否为 Code 失效类掉线（`disconnect_stop` / `kickout_stop` / `auto_code_refresh_failed` / `login_failed`）判定，用户手动停止后不会被历史掉线日志误判。
+  - 新增 `GET /api/accounts/code-health`（每账号状态快照）与 `POST /api/accounts/:id/auto-fix-code`（微信免扫码换 Code / QQ 尽力重签）。补码成功后运行中账号立刻用新 Code 重连、掉线停下的账号直接拉起，统一走 `restartAccount`，不再二次触发「启动前换码」，避免重复消耗一次性滚动凭证；失败返回 `needsManual`，同时写局内通知与账号日志。
+  - 侧栏 10 秒轮询同时刷新账号与 Code 健康快照，所以不打开账号管理页也在监听；账号管理页新增「Code 自动监听」卡片，列出异常账号与原因，可自动补的直接自动补（同一状态 10 分钟节流，失败后停止自动重试），不能自动补的提示并提供「立即补 Code」一键打开补码弹窗（清空旧 Code，填新 Code 保存后自动重新登录）。
+- **测试与验证**：新增 core 12 项、web 8 项；core 398/398、web 101/101、`tsc`、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。环境无浏览器 / 真机，界面与配色为静态断言 + 构建验证。
+- **上游「首页运行诊断模块」暂不移植**：核查 `liyangpengs/qq-farm-bot` master（HEAD `5bdc029`）首页只有账号/资产/库存、运行日志、下次巡查倒计时、今日统计，未发现独立的「运行诊断」模块；经用户确认本轮跳过。
+
+### 2026-11-08 · 快成熟判定随机化 + 图鉴每日自动领奖/补种与背包过滤 + 今日金币支持负数
+
+- **「土地与施肥 → 快成熟判定」秒数改为 300 内随机**：原先 `fertilizer_smart_seconds`（默认 300、可配 30~3600）是固定阈值，每轮 smart 施肥都用同一个临界点。新增 `pickSmartMatureThreshold(configuredSec, random)`：每轮巡查在 `[1, min(配置值, 300)]` 内随机取一个整数秒，配置值只作为上限且封顶 300 秒；随机源可注入，便于回归测试。设置页加说明文字，输入框、单位换算、默认值 300、后端 clamp 范围全部不变。
+- **收藏图鉴自动化**（按用户确认同时做「后台每天检查一次」与「一键购买加背包判断」，两项都带开关）：
+  - 新增 `core/src/services/illustrated-auto.ts`：挂在 worker 每日例行 `runDailyRoutines`，服务内用 `getSystemDateKey()` 做同一天去重 —— 登录 / 跨天各检查一次，不是每轮农场巡查。
+  - `illustrated_auto_claim_rewards`（默认关）：有可领奖励时自动领取作物（type=1）与超变（type=2）两本图鉴。
+  - `illustrated_auto_buy_missing_seeds`（默认关）：自动购买「未点亮 + 可下单 + 背包里没有该种子」的作物种子，每种买 1 个；单个失败不中断，购买前过滤等级锁 / 限购 / 解锁卡 / 无元数据。会实际消耗金币，所以默认关闭。
+  - 两个后台开关由关变开时，保存配置后 **2 秒立即检查一次**，不用等明天或重登（`illustrated_auto_after_save`）。
+  - `illustrated_buy_skip_bag`（默认开）：前端「一键购买未解锁」先读 `/api/bag/seeds`，跳过背包里已有的种子；背包读取失败时禁用一键购买，避免重复下单；确认弹窗显示已跳过数量。购买成功刷新时会重新读取背包。
+  - 开关有两个入口：功能模块 → 日常与活动 → 收藏图鉴（保存并关闭生效），以及收藏图鉴 → 奖励详情弹窗内的「每日自动托管」（`IllustratedAutomationSwitches.vue`，改完立即保存），共用同一份配置。
+- **首页「今日统计」金币偶发显示 0**：后端 `session.goldGained = 当前金币 - 当日基线` 是净值，买种子 / 买化肥等消费高于收益时为负；前端 `Math.max(0, ...)` 把负数夹成 0，且空态判断 `<= 0` 会让负数落进「等待第一份收获」。现改为保留负数、空态只在 `=== 0` 时出现，负数数字用 `var(--ui-danger)`（与「资产 → 金币 → 本次运行」的 `.ov-tile__delta.is-down` 同一个 token）。经验只增不减，仍保持非负。
+- **测试**：新增 core 11 项（`fertilizer-smart-threshold.test.js` 3 + `illustrated-auto.test.js` 8）、web 11 项（3 个文件），全部做过反向验证：固定阈值 / 恢复夹零 / 删开关各 fail 1，去掉背包过滤 fail 2，恢复后全绿。顺带修 `planting.ts` 一处既有未使用导入。
+- **验证**：core 386/386、web 93/93、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。环境无浏览器 / 真机，图鉴弹窗与负数配色为静态断言 + 构建验证，无截图。
+
 ### 2026-11-07 · 运行日志筛选手机端显示完整 + 神秘商人页签移到第 4 + 催熟时间核查
 
 - **首页运行日志「所有事件」按钮手机端显示不全**：`.dashboard-log-toolbar` 手机端是 `minmax(0, 1fr) minmax(0, 1fr) 32px` 三列，两个下拉各只分到约 140px，还要给常驻的 32px 重置按钮列让位，选中标签（「所有事件」以及较长的事件名）会被省略号截断。改为两列 `minmax(0, 1fr) 32px` + 显式 `grid-row` 重排：搜索独占第 1 行整宽、模块筛选与重置按钮第 2 行、**事件筛选独占第 3 行整行宽度**。两个 `BaseSelect` 各包一层带 class 的容器以便栅格定位；PC 端（`@container runtime-log (min-width: 640px)`）仍是一行四列，完全不变。手机端工具栏只比原来多一行。
