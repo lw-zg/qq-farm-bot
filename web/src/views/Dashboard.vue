@@ -4,8 +4,8 @@ import { useIntervalFn } from '@vueuse/core'
 import { storeToRefs } from 'pinia'
 import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import api, { getApiErrorMessage } from '@/api'
+import AccountCareerModal from '@/components/AccountCareerModal.vue'
 import LevelForecast from '@/components/LevelForecast.vue'
-import RuntimeDiagnosticsCard from '@/components/RuntimeDiagnosticsCard.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseInput from '@/components/ui/BaseInput.vue'
 import BaseSelect from '@/components/ui/BaseSelect.vue'
@@ -718,6 +718,45 @@ watch(filteredLogs, (next, previous) => {
   })
 }, { deep: true })
 
+// 个人页（角色生涯）：入口只在首页头像，右上角账号菜单保持切换账号用途。
+const showCareerModal = ref(false)
+const careerLoading = ref(false)
+const careerError = ref('')
+const careerProfile = ref<Record<string, any>>({})
+const careerItems = ref<any[]>([])
+
+async function loadCareer() {
+  if (!currentAccountId.value)
+    return
+  careerLoading.value = true
+  careerError.value = ''
+  try {
+    const { data } = await api.get('/api/career')
+    if (!data?.ok)
+      throw new Error(getApiErrorMessage(data, '生涯记录读取失败'))
+    careerProfile.value = data.data || {}
+    careerItems.value = data.data?.items || []
+  }
+  catch (e: any) {
+    careerError.value = getApiErrorMessage(e, '生涯记录读取失败')
+  }
+  finally {
+    careerLoading.value = false
+  }
+}
+
+function openCareer() {
+  if (!currentAccountId.value)
+    return
+  showCareerModal.value = true
+  void loadCareer()
+}
+
+watch(currentAccountId, () => {
+  if (showCareerModal.value)
+    void loadCareer()
+})
+
 onMounted(async () => {
   statusStore.setRealtimeLogsEnabled(!hasActiveLogFilter.value)
   await refresh()
@@ -738,12 +777,20 @@ useIntervalFn(updateCountdowns, 1000)
       <!-- 账号：身份、在线状态与等级进度 -->
       <section class="ov-card ov-account">
         <div class="ov-account__head">
-          <div class="ov-avatar" :class="{ 'is-online': isOnline }">
+          <button
+            type="button"
+            class="ov-avatar"
+            :class="{ 'is-online': isOnline }"
+            :disabled="!currentAccountId"
+            aria-label="查看角色生涯"
+            title="查看角色生涯"
+            @click="openCareer"
+          >
             <img v-if="accountAvatar && accountAvatar !== failedAccountAvatar" :key="accountAvatar" :src="accountAvatar" alt="" @error="handleAccountAvatarError">
             <span v-else class="i-carbon-user-avatar" />
             <i class="ov-avatar__dot" />
-          </div>
-          <div class="min-w-0 flex-1">
+          </button>
+          <div class="ov-account__info min-w-0 flex-1">
             <div class="ov-account__name-row">
               <strong class="ov-account__name" :title="displayName">{{ displayName }}</strong>
               <span class="ov-level">Lv.{{ status?.status?.level || 0 }}</span>
@@ -998,9 +1045,6 @@ useIntervalFn(updateCountdowns, 1000)
           </div>
         </section>
 
-        <!-- 运行诊断：进程 / 队列 / 事件循环指标 -->
-        <RuntimeDiagnosticsCard />
-
         <!-- Operations Grid -->
         <div class="farm-card rounded-2xl bg-white p-5 shadow-md dark:bg-gray-800">
           <h3 class="mb-3 flex items-center justify-between gap-2 text-lg font-display font-medium">
@@ -1082,6 +1126,19 @@ useIntervalFn(updateCountdowns, 1000)
         </div>
       </div>
     </div>
+
+    <Teleport to="body">
+      <AccountCareerModal
+        :show="showCareerModal"
+        :account="currentAccount"
+        :profile="careerProfile"
+        :items="careerItems"
+        :loading="careerLoading"
+        :error="careerError"
+        @close="showCareerModal = false"
+        @refresh="loadCareer"
+      />
+    </Teleport>
   </div>
 </template>
 
@@ -1275,6 +1332,7 @@ useIntervalFn(updateCountdowns, 1000)
   flex-shrink: 0;
 }
 
+/* 与右上角账号菜单、个人页弹窗的头像统一：正圆 + 一圈细描边。 */
 .ov-avatar {
   position: relative;
   width: 52px;
@@ -1282,10 +1340,31 @@ useIntervalFn(updateCountdowns, 1000)
   display: grid;
   flex: none;
   place-items: center;
-  border-radius: 16px;
+  appearance: none;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
   color: var(--ui-subtle);
   background: var(--ui-surface-soft);
   font-size: 26px;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px var(--ui-border);
+  transition: box-shadow 0.16s ease;
+}
+
+.ov-avatar:hover:not(:disabled) {
+  box-shadow:
+    0 0 0 1px var(--ui-border),
+    0 0 0 3px color-mix(in srgb, var(--theme-primary) 45%, transparent);
+}
+
+.ov-avatar:focus-visible {
+  outline: 2px solid var(--theme-primary);
+  outline-offset: 2px;
+}
+
+.ov-avatar:disabled {
+  cursor: default;
 }
 
 .ov-avatar img {
@@ -1295,10 +1374,11 @@ useIntervalFn(updateCountdowns, 1000)
   object-fit: cover;
 }
 
+/* 正圆头像没有方角，状态点贴到右下 45° 的圆周上。 */
 .ov-avatar__dot {
   position: absolute;
-  right: -3px;
-  bottom: -3px;
+  right: 0;
+  bottom: 0;
   width: 14px;
   height: 14px;
   border: 3px solid var(--ui-surface-strong);
@@ -1859,10 +1939,46 @@ useIntervalFn(updateCountdowns, 1000)
 }
 
 @media (max-width: 639px) {
+  /* 手机端文字是三行（名称 / 在线 / 已运行），实测高 71.8px；
+     PC 端两行 51.3px 对应 52px 头像，PC 端保持原样。
+     这里只在手机端把头像等比放大到 72px，与三行文字等高，仍是正圆。 */
+  .ov-account__head {
+    --ov-avatar-size: 72px;
+    gap: 10px;
+  }
+
+  .ov-avatar {
+    width: var(--ov-avatar-size);
+    height: var(--ov-avatar-size);
+    font-size: 34px;
+  }
+
+  /* 圆周变大，在线点同步内移，仍落在右下 45° 圆周上。 */
+  .ov-avatar__dot {
+    right: 3px;
+    bottom: 3px;
+  }
+
+  .ov-account__info {
+    min-height: var(--ov-avatar-size);
+  }
+
+  /* 头像变宽后文字区变窄：收紧间距、禁止「已运行」被挤成第四行，
+     让文字块高度稳定在 72px，头像与文字始终等高。 */
+  .ov-presence {
+    column-gap: 6px;
+  }
+
+  .ov-presence__item {
+    white-space: nowrap;
+  }
+
   /* 手机端：「在线」占第一行，「已运行 + 平台标签」整组落到下面一行；
      PC 端不触发，仍与在线图标同处一行。字号略缩，保证跨天时长也能完整一行显示。 */
   .ov-presence__meta {
     flex: 0 0 100%;
+    column-gap: 6px;
+    overflow: hidden;
     font-size: 11px;
   }
 
@@ -1894,9 +2010,10 @@ useIntervalFn(updateCountdowns, 1000)
     grid-column: 1;
   }
 
+  /* 手机端「所有事件」与上面的「所有模块」同列同宽；PC 端布局不受影响。 */
   .dashboard-log-event {
     grid-row: 3;
-    grid-column: 1 / -1;
+    grid-column: 1;
   }
 
   .dashboard-log-reset {

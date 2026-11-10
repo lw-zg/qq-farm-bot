@@ -5,7 +5,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import api from '@/api'
 
-import { isMenuActive, menuGroups, menuPath, visibleMenuRoutes } from '@/router/menu'
+import { isMenuActive, menuGroups, menuLink, visibleMenuRoutes } from '@/router/menu'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
 import { useStatusStore } from '@/stores/status'
@@ -154,7 +154,7 @@ watch(sidebarOpen, async (open) => {
 })
 watch(desktop, () => appStore.closeSidebar())
 
-const version = __APP_VERSION__
+const versionLabel = __APP_VERSION_LABEL__
 
 watch(
   () => route.path,
@@ -196,7 +196,7 @@ watch(
           {{ group.label }}
         </h2>
         <RouterLink
-          v-for="item in group.items" :key="item.name" :to="menuPath(item)"
+          v-for="item in group.items" :key="item.name" :to="menuLink(item)"
           class="farm-nav-item" :class="{ 'is-active': isMenuActive(item, route.path) }"
           :aria-current="isMenuActive(item, route.path) ? 'page' : undefined"
           @click="appStore.closeSidebar"
@@ -216,7 +216,7 @@ watch(
         <span class="text-[11px] text-[var(--muted-text)] tabular-nums">{{ formattedTime }}</span>
       </div>
       <div class="mt-2 flex items-center justify-between text-[11px] text-[var(--muted-text)]">
-        <span>v{{ version }}</span>
+        <span>{{ versionLabel }}</span>
         <a href="https://github.com/602832789/qq-farm-bot" target="_blank" rel="noopener noreferrer" aria-label="打开 GitHub 项目主页">GitHub ↗</a>
       </div>
     </div>

@@ -4,6 +4,106 @@
 
 这里记录 QQ Farm Bot 已完成的重要功能和改进。最新记录在最前面。
 
+## 版本总览
+
+> **版本号规则**：采用 `MAJOR.MINOR.PATCH`，每次更新提交后自动递增 —— 新增功能 → `MINOR` 进 1、`PATCH` 归零；修复 / 优化 / 回滚 → `PATCH` 进 1；重大不兼容变更 → `MAJOR` 进 1（手动 `--type major`）。
+> **跳过数字 4**：版本号三段与更新序号在递增时，只要十进制表示任意位置含 `4` 就继续跳到下一个不含 `4` 的整数（`4 → 5`、`14 → 15`、`39 → 50`）。
+> **全量重排**：全部历史记录已按时间正序重新编号，以 `v3.0.0 · 第 1 次更新` 为起点；此前 `v2.x` / `v2.9.x` 等旧版本序列的对应关系已作废，一律以本表为准。详细记录正文里提到的旧版本号属于当时的叙述，同样已作废。
+> **更新序号**：累计更新次数，每次提交无条件 +1（遇到含 `4` 的序号自动跳过）；所有详细记录都带版本号与更新序号。
+> 版本号由 `version.json` 统一维护，可用 `pnpm version:bump` 手动递增，安装 `pnpm hooks:install` 后每次提交自动递增；提交前手动递增的首条记录没有提交号（显示 `—`），由 hook 自动递增的记录会带上对应提交号。
+
+| 版本 | 更新序号 | 日期 | 更新内容 | 提交 |
+| --- | --- | --- | --- | --- |
+| v3.13.0 | #109 | 2026-11-10 | feat(core): 网关诊断日志改为中文文案，压力/超时/心跳/让路不再输出英文键值 | `8363558f` |
+| v3.12.0 | #108 | 2026-11-10 | feat(web/core): 账号卡片显示上次自动续期时间与今日失败次数 | `d60b9537` |
+| v3.11.2 | #107 | 2026-11-10 | docs(deploy): NAS 反复部署的空间维护脚本与清理说明 | `f0ebb42d` |
+| v3.11.1 | #106 | 2026-11-10 | style(web): PC 端账号登录与重连卡片开关移到说明文字下方 | `b5910d3e` |
+| v3.11.0 | #105 | 2026-11-10 | feat(web/core): 账号管理页新增免扫码续期标记，账号列表不再下发凭证明文 | `edff9d1c` |
+| v3.10.6 | #103 | 2026-11-10 | fix(docker): 基础镜像默认走全限定地址，无需改动环境配置即可构建 | `50269f7d` |
+| v3.10.5 | #102 | 2026-11-10 | fix(docker): 去掉外部 frontend 指令，修复国内镜像站构建 401 | `780c34c` |
+| v3.10.3 | #101 | 2026-11-10 | fix(core): 2×2 预留时间策略完整落地，消除部分空出时的重复请求 | `7a8366e` |
+| v3.10.2 | #100 | 2026-11-10 | fix(web/core): 去除定时重登 + 账号保活卡片改名合并 + 修复种植日志合并 | `b0fe642` |
+| v3.10.1 | #99 | 2026-11-10 | fix(core): 日熔断额度只统计失败，成功续期不占额度 | `ee43f58` |
+| v3.10.0 | #98 | 2026-11-10 | fix(core): 参考老版本新增后端自主到期前预防性续期与失败熔断 | `a52e05b` |
+| v3.9.6 | #97 | 2026-11-10 | revert: 回滚「去除账号管理内 Code 自动监听」，恢复完整链路 | `2a1ffa0` |
+| v3.9.5 | #96 | 2026-11-10 | refactor(web/core): 去除账号管理内 Code 自动监听 | `aaaaee5` |
+| v3.9.3 | #95 | 2026-11-09 | style(web): 手机端头像放大到与三行文字等高，PC 端不变 | `880b4c6` |
+| v3.9.2 | #93 | 2026-11-09 | style(web): 首页头像改为圆形 + 全站头像风格统一 | `843a62a` |
+| v3.9.1 | #92 | 2026-11-09 | fix(test): 修正版本总览重渲染后的一次性迁移说明断言 | `6f04aad` |
+| v3.9.0 | #91 | 2026-11-09 | feat(web): 移植老版本个人页（角色生涯）并把入口改为首页头像 | `4e0321c` |
+| v3.8.5 | #90 | 2026-11-09 | 版本号与更新次数自动跳过数字 4 | `f1c9397` |
+| v3.8.3 | #89 | 2026-11-09 | 修复「游戏商城」页签被弹回神秘商人 + 默认页签作用域收窄 | `c6105dc` |
+| v3.8.2 | #88 | 2026-11-09 | 修复容器部署时首页显示「第 0 次更新」 | `e2b965a` |
+| v3.8.1 | #87 | 2026-11-09 | 快成熟判定默认值改回 300 秒 + 阈值命中率模拟结论 | `ae83736` |
+| v3.8.0 | #86 | 2026-11-09 | 新增版本号功能 + 快成熟判定默认值改为 60 秒 | — |
+| v3.7.2 | #85 | 2026-11-09 | 首页诊断移除 + 快成熟回滚 + 神秘商人来访横幅 + 日志刷屏治理 + 奶茶支撑时间修正 | — |
+| v3.7.1 | #83 | 2026-11-08 | 今日统计去掉单位「次」 + 账号管理 Code 过期自动监听与自动补码 | — |
+| v3.7.0 | #82 | 2026-11-08 | 快成熟判定随机化 + 图鉴每日自动领奖/补种与背包过滤 + 今日金币支持负数 | — |
+| v3.6.1 | #81 | 2026-11-07 | 运行日志筛选手机端显示完整 + 神秘商人页签移到第 4 + 催熟时间核查 | — |
+| v3.6.0 | #80 | 2026-11-07 | 新增面板内消息（局内通知）：顶栏铃铛 + 本地持久化 | — |
+| v3.5.15 | #79 | 2026-11-07 | 补齐神秘商人「到货提醒 / 购买通知」开关与保存后立即巡查 | — |
+| v3.5.13 | #78 | 2026-11-07 | 节令日历手机端可下滑 + 神秘商人购买历史回归 + 自动化开关验证 | — |
+| v3.5.12 | #77 | 2026-11-06 | 功能模块「土地与施肥」2x2催熟开关间距 | — |
+| v3.5.11 | #76 | 2026-11-06 | 同步上游 muyuewang/qq-farm-bot-404（ed75089..3b3608c，PR #119–#121）并保留本地改动 | — |
+| v3.5.10 | #75 | 2026-11-06 | 图鉴标题与收藏计数等高 + 奶茶两行左对齐 | — |
+| v3.5.9 | #73 | 2026-11-06 | 奶茶页返回按钮文案简化为「活动中心」 | — |
+| v3.5.8 | #72 | 2026-11-06 | 首页已运行手机端换行 + 去除奶茶侧栏「活动中心」/「快乐不独享」日期 | — |
+| v3.5.7 | #71 | 2026-11-06 | 土地等级二级弹窗缩小，与作物气泡同尺寸同风格 | — |
+| v3.5.6 | #70 | 2026-11-06 | 奶茶头部返回按钮合并 + 恢复「剩余时间」靠右对齐 | — |
+| v3.5.5 | #69 | 2026-11-06 | 首页状态行再退一格 + 回滚「剩余时间」靠右对齐 | — |
+| v3.5.3 | #68 | 2026-11-06 | 手机端排版再调整：首页恢复原方案 + 领取收益 PC/手机同排 | — |
+| v3.5.2 | #67 | 2026-11-06 | 手机端固定排版：首页已运行状态行 + 奶茶活动三处对齐 | — |
+| v3.5.1 | #66 | 2026-11-06 | 土地气泡收益跟随变异叠加 + 奶茶活动 4 个新开关 | — |
+| v3.5.0 | #65 | 2026-11-06 | 首页「已运行」不再跳位 + 重新登录后自动上线 | — |
+| v3.3.18 | #63 | 2026-11-06 | 微信授权续期稳定性 + 土地详情恢复老版作物气泡 | — |
+| v3.3.17 | #62 | 2026-11-06 | 任意页面切换账号后保持原页面与原滚动位置 | — |
+| v3.3.16 | #61 | 2026-11-06 | 修复背包种子页仍每 10 秒自动刷新 | — |
+| v3.3.15 | #60 | 2026-11-05 | 同步上游 20261104 更新（PR #117-#118 至 ed75089） | — |
+| v3.3.13 | #59 | 2026-11-05 | 今日统计卡片样式统一 + 增量逻辑分离 + 农场页整体刷新治理 | — |
+| v3.3.12 | #58 | 2026-11-05 | 今日统计加金币/经验增量 + 背包排序 + 农场自动刷新开关 + 移动端导航调整 | — |
+| v3.3.11 | #57 | 2026-11-05 | 切换账号后保持在所有活动页面 | — |
+| v3.3.10 | #56 | 2026-11-05 | 切换账号后保持在奶茶热销中页面 | — |
+| v3.3.9 | #55 | 2026-11-05 | 活动中心默认进入奶茶热销中 | — |
+| v3.3.8 | #53 | 2026-11-05 | 营业记录数据链路对齐老版（补回 normalizeWireMaps） | — |
+| v3.3.7 | #52 | 2026-11-05 | 再次恢复 milk_tea_work_interaction_type / milk_tea_hire_policy 接线 | — |
+| v3.3.6 | #51 | 2026-11-05 | 再次撤销 milk_tea_work_interaction_type / milk_tea_hire_policy 接线 | — |
+| v3.3.5 | #50 | 2026-11-05 | 恢复 milk_tea_work_interaction_type / milk_tea_hire_policy 两项接线 | — |
+| v3.3.3 | #39 | 2026-11-05 | 页面闪烁治理 + 策略预览秒开 + 背包默认页签 | — |
+| v3.3.2 | #38 | 2026-11-05 | 营业记录图标补全 + 图鉴搜索框位置调整 | — |
+| v3.3.1 | #37 | 2026-11-05 | 四页控件显示效果统一（对齐全站 BaseButton 规范） | — |
+| v3.3.0 | #36 | 2026-11-05 | 15 项功能开关失效修复（老版方案移植） | — |
+| v3.2.12 | #35 | 2026-11-05 | 回滚 3 项开关接线（milk_tea_work_interaction_type / milk_tea_seed_policy / milk_tea_hire_policy） | — |
+| v3.2.11 | #33 | 2026-11-05 | 2×2 催熟功能修复与背包多格种子角标 | — |
+| v3.2.10 | #32 | 2026-11-05 | 服务启动自动登录与登录 Code 续期修复 | — |
+| v3.2.9 | #31 | 2026-11-05 | 回滚硬预算期的省请求改动 + 修复奶茶手动兑换 | — |
+| v3.2.8 | #30 | 2026-11-05 | 网关流量机制重构：前台操作不再被限额 | — |
+| v3.2.7 | #29 | 2026-11-05 | 手机端账号入口与操作按钮统一 | — |
+| v3.2.6 | #28 | 2026-10-15 | 奶茶热销中活动与经营自动化 | — |
+| v3.2.5 | #27 | 2026-09-24 | 秋祈良愿与快乐不独享活动 | — |
+| v3.2.3 | #26 | 2026-09-10 | 萌宠成长日记与变异效果补全 | — |
+| v3.2.2 | #25 | 2026-09-08 | NapCat QQ 扫码登录与 Docker 部署 | — |
+| v3.2.1 | #23 | 2026-09-08 | NapCat QQ 扫码登录与 Docker 部署 | — |
+| v3.2.0 | #22 | 2026-09-01 | 公益小红花活动支持 | — |
+| v3.1.1 | #21 | 2026-09-01 | 好友成熟调度与访问治理 | — |
+| v3.1.0 | #20 | 2026-09-01 | 公益小红花活动支持 | — |
+| v3.0.18 | #19 | 2026-09-01 | 好友成熟调度与访问治理 | — |
+| v3.0.17 | #18 | 2026-08-26 | 雨落成诗活动适配 | — |
+| v3.0.16 | #17 | 2026-08-26 | 限时活动下线与开关防回启 | — |
+| v3.0.15 | #16 | 2026-08-25 | 低配服务器资源治理与线程调度优化 | — |
+| v3.0.13 | #15 | 2026-08-21 | 背包种子排序与选种策略精简 | — |
+| v3.0.12 | #13 | 2026-08-20 | 活动礼包与钻石余额 | — |
+| v3.0.11 | #12 | 2026-08-19 | 内置微信扫码、版本同步与运行自愈 | — |
+| v3.0.10 | #11 | 2026-08-18 | 鹊桥寄情活动 | — |
+| v3.0.9 | #10 | 2026-08-17 | 未来活动分析 | — |
+| v3.0.8 | #9 | 2026-08-14 | 土地变异效果 | — |
+| v3.0.7 | #8 | 2026-08-13 | 青酿换万金活动 | — |
+| v3.0.6 | #7 | 2026-08-07 | 手机抓包登录 | — |
+| v3.0.5 | #6 | 2026-08-03 | 土地展示重做 | — |
+| v3.0.3 | #5 | 2026-08-03 | 生涯统计与体验优化 | — |
+| v3.0.2 | #3 | 2026-08-03 | 心许千灯星垂野活动 | — |
+| v3.0.1 | #2 | 2026-08-03 | TSDK/WASM 协议更新 | — |
+| v3.0.0 | #1 | 2026-08-03 | 2×2 作物种植 | — |
+
 ## 更新流水图
 
 ```mermaid
@@ -20,25 +120,229 @@ flowchart TB
     J --> K[2026-08-26<br/>雨落成诗与下线治理]
     K --> L[2026-09-01<br/>好友成熟调度与访问治理与小红花活动支持]
     L --> M[2026-09-08<br/>NapCat QQ 扫码登录]
-    M --> N[2026-09-10 · v2.7.0<br/>萌宠成长日记与变异效果补全]
-    N --> O[2026-09-24 · v2.7.1<br/>秋祈良愿与快乐不独享活动]
+    M --> N[2026-09-10 · v3.2.3<br/>萌宠成长日记与变异效果补全]
+    N --> O[2026-09-24 · v3.2.5<br/>秋祈良愿与快乐不独享活动]
 
-    O --> P[2026-10-15 · v2.8.0<br/>奶茶热销中活动与经营自动化]
+    O --> P[2026-10-15 · v3.2.6<br/>奶茶热销中活动与经营自动化]
 
     classDef seed fill:#e8f8ee,stroke:#20b967,color:#183d2a,stroke-width:2px;
     class A,B,C,D,E,F,G,H,I,J,K,L,M,N,O,P seed;
 ```
 
 ## 详细记录
-### 2026-11-08 · 首页新增「运行诊断」模块（截图对照自建）
+### 2026-11-10 · v3.13.0（#109） · 网关诊断日志改为中文文案（压力 / 超时 / 心跳 / 让路）
 
-- **现成代码核查**：按截图逐项检索本地三套源码、legacy bundle、`_preview` 旧产物，以及 `liyangpengs/qq-farm-bot` 的 master / `test_20260828` 全部分支与首页提交历史，均未发现「运行诊断 / 队列空闲 / 事件循环 P99」实现；上游首页只有运行日志、巡查倒计时、今日统计。因此不移植，改用项目已有的 `/api/scheduler` 调度器任务快照作数据源，其余完整自建。
-- **后端采集**：新增 `core/src/services/runtime-diagnostics.ts`（10 分钟滚动窗口、2 秒采样、200ms 事件循环探针）——CPU 区间平均按 `process.cpuUsage()` 差值 / CPU 核数换算、堆内存趋势、事件循环延迟 P99、当前排队 / 256 与峰值、近 10 分钟完成 / 失败 / 排队超时统计，自动判定「队列空闲 / 运行中 / 需要关注 / 队列积压」。`scheduler.ts` 在 `runTask` 用 `trackScheduledTask` 统一埋点（同步任务仍保持同步返回），`worker.ts` 的 `getSchedulers` 附带账号 Worker 进程读数。
-- **接口**：新增 `GET /api/runtime-diagnostics`（`runtime-diagnostics-routes.ts`），账号 Worker 读数 5 秒缓存避免首页轮询放大 IPC；采样器随 admin server 启动，定时器全部 `unref()` 不阻塞进程退出。
-- **前端卡片**：新增 `RuntimeDiagnosticsCard.vue`，按截图还原状态点 + 更新时间 + 2×2 指标（当前排队进度条 / CPU 区间平均 / 账号堆内存面积折线 / 事件循环 P99 实线与警戒虚线）+ 近 10 分钟汇总 + 「更多指标」展开 12 项辅助指标；10 秒自动刷新、请求序列竞态保护、错误重试；`Dashboard.vue` 右侧列挂在自动巡查与今日统计之间，手机端与暗色主题适配。
-- **测试与验证**：新增 core 15 项、web 12 项；core 413/413、web 113/113、`tsc`、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。环境无浏览器 / 真机，界面与配色为静态断言 + 构建验证；`vite build` 清空既有 `dist` 时被工作区批量删除保护拦截，移走旧产物后构建成功。
+- **需求**：运行日志里出现 `Gateway 请求压力: pending=3, queued=1, active=GetIllustratedListV2#513:12.327675000065938ms,...`，面板上像抓包日志，读不出「哪里堵了、堵了多久」。要求这类日志以后以中文形式显示。
+- **新增** `core/src/utils/net-diagnosis-text.ts`：统一的诊断文案格式化 —— 耗时按「毫秒 / 秒 / 分 秒」显示（十秒以上取整，消掉浮点尾巴）、计数说成「等待回包 N 个、排队 M 个」、列表项写成「方法名#序号（耗时）」「方法名（班次）」，空列表返回「无」，整行压力日志组装成 `网关请求压力：…；回包中：…；排队中：…`（对应计数为 0 的分段直接不写，不凑「回包中：无」）。
+- **班次中文化**：`request-priority.ts` 新增 `describeRequestClassLabel()` —— 心跳、ACE 上报、前台、自己农场、好友农场、后台补数据。带 `!H:` / `!A:` / `#` / `&` / `~` 的标记函数保留原样，只用于抓包对照。
+- **同一套文案覆盖的日志**：压力告警、`请求超时`（阶段改成 `尚未排到连接` / `已发往网关但未回包`）、`请求等待队列已满`（班次 / 上限 / 计数全中文）、`网关繁忙，后台请求已让路`（`已等待 8 秒`）、`自动任务请求已达流量上限`（原因与模式翻成人话：总量额度用尽 / 单方法额度用尽 / 连接正常 / 连接受限（降速）/ 连接无响应）、`心跳未响应`（漏拍 / 距上次心跳 / 连接无入站数据）、`网关无回包，××退避`（worker 侧）。顺手把 `连接未打开 / 发送失败 / 账号尚未登录 / 请求已中断` 的冒号统一成全角，并把 `93s` 这类秒写法改成 `93 秒`。
+- **分类兼容**：`isGatewayYieldError()` 增加 `尚未排到连接` 匹配，`stage=queued`、「请求等待队列已满」、「已让路」等旧关键字全部保留 —— `utils.ts` 的 `isTransientGatewaySkip()`、`error-handler.ts`、`commerce-routes.ts`、好友拜访策略都靠这些中文前缀做分类，文案中文化不能把它们改断。
+- **验证**：core 479/479（新增 `net-diagnosis-text` 6 项，含「压力行不得再出现 pending= / queued= / active=」的静态断言、额度原因未收录枚举原样保留、中文阶段仍判定为让路、已发往网关的超时不算让路），web 165/165，改动文件 ESLint、core tsc 全过；`docs/network-concurrency.md` 的压力日志章节同步更新。
 
-### 2026-11-08 · 今日统计去掉单位「次」 + 账号管理 Code 过期自动监听与自动补码
+### 2026-11-10 · v3.12.0（#108） · 账号卡片显示上次自动续期时间与今日失败次数
+
+- **需求**：用户确认「免扫码续期：支持」后，希望能不开网页、不登录后台，也能一眼看出 24 小时无人值守到底有没有真的在自动续期，不想每次去翻运行日志。
+- **为什么不能复用现有数据**：`wxCredentialRefreshedAt` 混了手动点「续期全部微信授权」的结果，看不出是不是后端自己干的；而 `createPreflightGovernor()` 里的 `failuresToday` 是进程内的限速 / 熔断状态，容器一重新部署就清零，正好和「24 小时无人值守」的验证目标相反。
+- **新增**：`core/src/services/preflight-stats.ts` 持久化账本，落在 `/app/core/data/preflight-stats.json`（`qq-farm-data` 命名卷，重建容器不丢）。按账号记 `lastSuccessAt` / `lastFailureAt` / `successesToday` / `failuresToday`，按 UTC+8 自然日归零（与熔断状态机同口径），但历史时间戳跨日保留，隔天早上仍能看到「上次自动续期是几小时前」。账本只写时间戳与计数，**不写 token / code / 接口错误原文**，读写全部 try/catch，落盘失败绝不阻断续期。
+- **口径**：只统计后端自动发起的续期 —— 到期前预防性续期（常开）与掉线自动重登；手动点按钮不计入，避免把人工操作误当成无人值守成果。由 `wx-keepalive.ts` 新增的可注入 `recordPreflightResult` 记账，`runtime-engine.ts` 接线到真实账本。
+- **前端**：账号卡片「免扫码续期」标签下新增一行「上次自动续期：X 分钟前 · 今日失败 N 次」，PC 端额外补「今日成功 N 次」；相对时间每 10 秒随账号轮询刷新。颜色分级：正常绿、今日出现过失败或超过 3 小时未成功琥珀、最近一次就是失败红、尚无记录灰。旧版服务字段缺失时整行不渲染，不会误报成「没在续期」；QQ 账号不显示。判定纯函数放在 `web/src/utils/credential-status.ts` 便于回归测试。
+- **接口**：`/api/accounts` 的对外投影继续剥离 `refreshtoken` / `accesstoken` / `loginBuffer`，额外附带账本快照；只对微信账号下发该字段，浏览器拿不到任何凭证内容。
+- **验证**：core 472/472、web 165/165（本轮 +13 / +10），改动文件 ESLint、core tsc、`vue-tsc -b`、`vite build` 全过；补了换日、脏数据、读写异常、容器重启不丢、账本不含凭证明文、手动续期不入账、注入函数抛错不中断重启等用例。
+
+### 2026-11-10 · v3.11.2（#107） · NAS 反复部署的空间维护脚本与清理说明
+
+- **需求**：用户在 NAS 上每更新一次就 `docker compose up -d --build` 重新测试一遍，占用从 30G 涨到 35G，需要既能把已占空间收回来，又能让以后每次部署不再继续累积。
+- **根因**：每次重建都给新镜像打 `qq-farm-bot:latest`，旧镜像变成 `<none>` 悬空镜像；BuildKit 把每一层构建缓存留在磁盘上，而本项目的 `version.json` 每次提交都变，会连带让 `web-builder` 及其后的层重新生成，所以增量特别明显。另有一个隐形增长点：`qq-farm-logs` 卷里的 `combined.log` / `error.log` 由 `core/src/services/logger.ts` 直接 append，**没有任何轮转或清理**；容器控制台日志反而已经受 compose 的 `json-file 10m × 3` 限制，不是主因。
+- **新增**：`scripts/nas-deploy.sh` 一键部署 —— `git pull --ff-only` → `docker compose up -d --build` → `docker image prune -f`（只删悬空镜像）→ `docker builder prune -f --filter until=24h`（保留最近一次可复用层），部署前后各打印一次 `docker system df` 便于看到回收量。可选 `--prune-logs` 截断应用日志卷里的两个大文件：winston 持有文件句柄，所以用 `: > file` 截断而不是 `rm`，容器不用重启。
+- **文档**：README「Docker 部署」下新增「NAS 反复部署时的空间维护」小节，写清「先 `docker system df -v` 诊断 → 备份 `qq-farm-data` → 分级 `image prune` / `builder prune` / `container prune` → 日志卷截断 → 复核」，并用醒目警告列出 `docker compose down -v`、`--volumes`、`docker volume prune` 等会删掉账号数据的禁区。
+- **数据安全**：脚本只删没有任何东西引用的悬空镜像与过期构建缓存，**绝不含** `-v` / `--volumes` / `volume prune` / `rm -rf`；`qq-farm-data`（账号、Code、refreshtoken）与 `qq-farm-logs` 永远保留。备份命令直接复用已有镜像 `qq-farm-bot:latest`，不额外拉 `alpine`，避开国内镜像站对 `library/*` 返回 401 的问题。
+- **防回归**：新增 `web/tests/nas-deploy.test.mjs` 4 项，锁住脚本完整流程、危险命令零出现（检查时剥掉列举禁令的注释行）、日志清理只截断不删除、README 与 compose 的卷/日志上限仍在。
+- **验证**：`sh -n scripts/nas-deploy.sh` 语法通过，core **459/459**、web **155/155**（+4），改动文件 ESLint、`vue-tsc -b`、`vite build` 全通过。脚本在 NAS 上的实际执行效果待用户 `git pull` 后验证。
+- **生效**：服务器 `git pull` 后，以后更新用 `bash scripts/nas-deploy.sh` 代替手工 `docker compose up -d --build`；想一次把历史缓存清干净，按 README 里的分级命令手动跑一次即可。
+
+### 2026-11-10 · v3.11.1（#106） · PC 端「账号登录与重连」卡片开关移到说明文字下方
+
+- **需求**：PC 端卡片里「掉线自动重登」开关原先和标题、说明文字并排挤在同一行右侧，文字被压窄、两个开关视觉位置不齐；要求把开关放到文字的最下面，并保持整体美观统一。
+- **改动**：`web/src/components/settings/AccountKeepAliveCard.vue` 的 `#extra` 两行（服务启动自动登录 / 掉线自动重登）在 `md:`（≥768px，PC 端）断点统一改为 `flex-col + items-start + gap-2`，按「标题 → 说明 → 开关」自上而下左对齐排列。两行同步处理，避免只挪一个造成左右不对称；手机端（<768px）保留原来的 `flex-wrap / items-center / justify-between` 并排布局，手机端观感不动。
+- **范围**：只调样式类，未改开关绑定（`saveAutoStart` / `toggleOffline`）、配置字段、状态标签与后端逻辑；卡片仍保持 `hide-switch`，不会冒出第二个含义不清的总开关。
+- **防回归**：`web/tests/account-online-card.test.mjs` 加断言，校验卡片内恰好两行具名设置、手机端基线类仍在、PC 端纵向类已加且没有 `md:flex-row` 反向覆盖，并确认「掉线自动重登」开关的 DOM 顺序确实排在标题与说明文字之后。
+- **验证**：core **459/459**、web **151/151**（+1），改动文件 ESLint、`vue-tsc -b`、`vite build` 全通过；构建产物 CSS 里已确认生成 `@media(min-width:768px)` 下的 `md:flex-col / md:items-start / md:gap-2`，样式确实生效而非只写在模板里。
+- **生效方式**：服务器 `git pull && docker compose up -d --build` 后刷新页面即可；纯前端样式调整，不需要改配置、不影响已有账号数据。
+
+### 2026-11-10 · v3.11.0（#105） · 账号管理页新增「免扫码续期」能力标记，账号列表不再下发长效凭证明文
+
+- **需求**：上一轮解释「得是有 wxid + refreshtoken 的微信账号」时，需要不敲命令就能一眼看出每个微信账号具不具备免扫码续期能力，因此在账号管理页加「支持 / 不支持」标签。
+- **判定口径**：后端复用 `wx-credential.hasWxCredential()` —— `platform === 'wx'` 且 `wxid` 与 `refreshtoken` 都非空，与 `wx-keepalive` 里到期前预防续期（常开）和掉线重登的准入条件完全一致。「支持」= 关掉网页也能自动续期；「不支持」= 只有 `loginBuffer` 或只剩 Code，长效凭证到期后仍需重新扫码。
+- **新增**：`core/src/services/account-visibility.ts` 把 `/api/accounts` 的响应做对外投影，每个账号只多一个布尔 `wxPreflightSupported`；`web/src/utils/credential-status.ts` 新增 `getWxPreflightBadge()` 纯函数，微信账号渲染绿色「支持」/ 琥珀色「不支持」/ 灰色「未知」，QQ 账号不渲染。「未知」用于旧后端尚未更新的场景，避免误报「不支持」；标签带悬停说明，PC 端另有一行小字解释，手机端只显示短标签不影响排版。
+- **顺带修的安全问题**：`/api/accounts` 被浏览器每 10 秒轮询，之前直接把 store 里的账号对象整个返回，`refreshtoken` / `accesstoken` / `loginBuffer` 这些能直接换游戏登录 Code 的长效凭证明文在 F12 网络面板里可见。现在只在 HTTP 响应副本上剥掉这三个字段；`code` / `wxid` / `expires_at` 等展示与编辑所需字段保留，`provider.getAccounts()` 及所有后端调用方仍拿完整对象，续期 / 补 Code / 启动换码链路不受影响。
+- **兼容性**：编辑账号弹窗读的是 `editData.code`，本次保留；前端本来就不读 `loginBuffer` 等字段，剥离无副作用。旧后端 + 新前端组合时标签显示「未知」并提示更新服务。
+- **防回归**：新增 `core/tests/account-visibility.test.js` 7 项（明文剥离、判定三要素、原对象不变、判定函数降级、顶层字段保留、异常数据兜底、路由接线静态断言）与 `web/tests/wx-preflight-badge.test.mjs` 7 项（三种状态、QQ 不渲染、卡片绑定、类型与后端接线、前端不读明文）。
+- **验证**：core **459/459**、web **150/150**，改动文件 ESLint、`core tsc` 编译、`vue-tsc -b`、`vite build` 全通过。
+- **生效方式**：服务器 `git pull && docker compose up -d --build` 后打开「设置 → 账号管理」，每个微信账号卡片「访问凭证」下方即显示该标记；不需要改任何配置，也不影响已有账号数据。
+
+### 2026-11-10 · v3.10.6（#103） · 基础镜像改走全限定地址，不改服务器任何环境配置即可构建
+
+- **需求**：上一轮删掉 `# syntax=` 后，构建能走到 `FROM node:20.19.6-alpine3.21`，但仍报 `load metadata for docker.io/library/node → https://docker.fnnas.com/v2/library/node/manifests/... → 401 Unauthorized`。用户要求**不改动服务器上的任何环境配置**（不改 `daemon.json` / 镜像站、不设环境变量、不建 `.env`），只在仓库代码里修好。
+- **为什么短名会中招**：`node:...` 会被补成 `docker.io/library/node`，而 `registry-mirrors` 恰好只对 `docker.io` 生效，宿主机那个失效的 fnOS 加速站 `docker.fnnas.com` 就会把请求拦下并返回 401。**带域名的全限定地址不走 `docker.io`，因此完全不经过 mirror** —— 这是唯一无需碰环境配置的解法。
+- **候选源实测**（按 Docker Registry v2 的 Bearer token 流程真实请求 `library/node:20.19.6-alpine3.21` 的 manifest）：`docker.m.daocloud.io` 连续三次 **HTTP 200**、`Docker-Content-Digest: sha256:eb0b81f6…` 稳定；`docker.1ms.run` 带 token 的 manifest 请求返回 000（超时）；`docker.xuanyuan.me` 返回 403。因此选 **DaoCloud public-image-mirror**（按需同步、镜像 sha256 与 Docker Hub 源站一致）作为默认。
+- **改动**：`core/Dockerfile` 的 `ARG NODE_IMAGE` 默认值与 `docker-compose.yml` 的 `${NODE_IMAGE:-...}` 默认值同步改为 `docker.m.daocloud.io/library/node:20.19.6-alpine3.21`，两处都补了原因注释和切回官方源的方法。两个 `FROM ${NODE_IMAGE}`（pnpm-base / runner）自动生效，`web-builder` / `core-builder` / `prod-deps` 都是本地 stage，没有别的外部镜像。默认值仍可用环境变量覆盖，只是**不再需要**覆盖。
+- **效果**：`git pull` 后直接 `docker compose up -d --build` 即可，无需改 `daemon.json`、无需重启 Docker、无需镜像站配置、无需任何环境变量。想切回官方源：`NODE_IMAGE=node:20.19.6-alpine3.21 docker compose up -d --build`。
+- **防回归**：`web/tests/version.test.mjs` 新增断言，锁住 Dockerfile 与 compose 的默认值一致、必须是全限定名、不得退回短名；与上一轮「禁止 syntax directive」的断言并存。
+- **验证**：core **452/452**、web **143/143**，改动文件 ESLint、`core tsc --noEmit`、`vue-tsc -b`、`vite build` 全通过，compose YAML 解析正常。本地无 Docker 守护进程，**未实测 `docker build`**，需在有 Docker 的机器上确认。
+- **边界**：DaoCloud 是按需同步的白名单源，若将来该源不可用，可临时用 `NODE_IMAGE` 指向其他可达源，或改上述两处默认值。下一个潜在国内网络卡点是 `apk add tzdata` 走 Alpine CDN（`dl-cdn.alpinelinux.org`），与本次的 registry 401 不是同一环节。
+
+### 2026-11-10 · v3.10.5（#102） · 修复国内镜像站下 Docker 构建第一步 401（去掉外部 frontend 指令）
+
+- **现象**：在飞牛 NAS 上执行 `docker compose up -d --build`，构建卡 166 秒后第一步就失败：`failed to resolve source metadata for docker.io/docker/dockerfile:1.7: unexpected status from HEAD request to https://docker.fnnas.com/v2/docker/dockerfile/manifests/1.7?ns=docker.io: 401 Unauthorized`。
+- **根因**：`core/Dockerfile` 第 1 行的 `# syntax=docker/dockerfile:1.7` 不是普通注释，而是 Dockerfile parser directive —— BuildKit 会先去 registry 把 `docker/dockerfile:1.7` 镜像拉下来当解析器，之后才开始读 Dockerfile 正文。国内镜像加速站（`docker.fnnas.com`）不代理或需要认证 `docker/dockerfile` 这个 namespace，manifest 的 HEAD 请求返回 401，于是整个构建在解析阶段就挂掉。与项目代码、`node` 基础镜像、`pnpm` 都无关，也不是代码有错。
+- **修复**：删掉该 directive，改用 Docker 引擎**内置**的 `dockerfile.v0` 解析器，构建不再需要拉取任何外部 frontend 镜像。核查确认本文件实际只用到多阶段构建、`ARG` before `FROM`、`COPY --from`、`RUN --mount=type=cache`（Dockerfile 1.2 起即内置支持）与 `HEALTHCHECK`，**没有任何 1.7 独有语法**，因此构建行为与产物完全不变。文件头补了说明注释，避免以后被误加回来；`napcat/Dockerfile` 本来就没有该指令，不受影响。
+- **防回归**：`web/tests/version.test.mjs` 新增断言，禁止 Dockerfile 再出现行首 `syntax=` directive，同时确认仍保留多阶段起点与 cache mount。
+- **验证**：core **452/452**、web **142/142**，改动文件 ESLint、`core tsc --noEmit`、`vue-tsc -b`、`vite build` 全通过。本地无 Docker 守护进程，无法实测 `docker build`，需在有 Docker 的机器上重新执行 `docker compose up -d --build` 确认。
+- **部署提示**：服务器上若暂不方便 `git pull`，可直接 `sed -i '/^# syntax=docker\/dockerfile:/d' core/Dockerfile` 后重建，效果相同。若后续基础镜像 `node:20.19.6-alpine3.21` 也被镜像站拒绝，可用 compose 的 `NODE_IMAGE` 构建参数换成可拉取的镜像。极老的 Docker 若在 `RUN --mount` 上报 `Unknown flag: mount`，去掉两处 `--mount=type=cache,...` 参数即可（依赖层隔离仍在，只是少了 pnpm store 跨构建缓存）。
+
+### 2026-11-10 · v3.10.3（#101） · 2×2 预留时间策略完整落地：修掉「部分空出就一直重复请求」
+
+- **需求**：分析老版本「预留 2×2 种子」的运行逻辑，并结合其策略做一个完整方案；起因是现版本在「目标 2×2 只空出一部分」时，短时间内会一直重复发请求。
+- **根因（上一轮分析确认）**：老版本 `planting-2x2-window.test.js` 保留着完整的「60 秒硬窗口」规格（剩余植株 ≤60 秒且末季才允许预留、等待期限 = 首次预留 + 60 秒且轮询不续期、到期/资格变化立即释放给 1×1、完整空闲方块立即立种、按真实清空时刻排序），但老仓库 HEAD `e8edb59` 的 `planting-service.js` 里这段判定已经掉线（跑该测试是 fail），现版本继承的是残缺版：`layout-reservation.ts` 选组只看「已空格数 → 沿用登记 → 锚点」，不看成熟时间/剩余季/已有 2×2 占地，也没有期限、冷却与状态闸门。于是巡田每 20–25 秒（叠加 `farm_push` 推送触发）都会发 `Lands` + `Bag` 请求，得出完全相同的「预留」结论，直到那几块作物成熟（可能数小时）。v3.10.2 只修了日志合并，请求一轮没少。
+- **新增 `core/src/services/farm/reservation-window.ts`（时间策略层）**：`estimateLandClearAt()` 按 `phases` 的成熟阶段 + 剩余季数 × `getPlantGrowTime()` 估算清空时刻（空地 = 0、缺阶段 = 不可判定、多季必须等末季）；`getLayoutClearMetrics()` 算组内最晚 `clearAt` 与 `lockCost`；`isQualifiedForWaiting()` 只放行 60 秒内（含 60）能清空的组；`collectActive2x2Footprints()` 排除已被 2×2 作物占着的组；`occupantIdentity()` 只用播种时刻认「新种植周期」，成熟时刻抖动和收割变短都不算；`createReservationWindow()` 按组独立记账首次预留 + 60 秒硬期限（服务器时钟、轮询不续期），到期/资格变化释放并记住占用者防反复圈地；`createFailureCooldown()` 按组 30 秒失败冷却；`buildPlantingRoundSignature()` + `createPlantingRoundGate()` 做整轮土地状态闸门。
+- **选组接入（`layout-reservation.ts`）**：`selectFutureLayoutReservation()` 新增可选 `timeWindow`（最新土地快照 / 全局空地 / 服务器时钟 / 冷却组）；传入时按老版本口径过滤 footprint 与不合格组，并按 **真实清空时刻 → 锁地代价 → 沿用登记 → 已空格数 → 锚点** 排序，返回 `key` / `clearAt` / `lockCost`。不传时保持旧的纯几何行为与返回形状，既有回归用例全部不动。
+- **主链路接入（`planting.ts` / `scheduler.ts`）**：`autoPlantEmptyLands()` 把每轮 `knownLands` 快照透传到 `plantFromBagSeeds()`；预留前先过 60 秒资格过滤，再用 `reservationWindow.evaluate()` 判硬期限，被拒（不合格 / 到期 / 已释放）时**不再圈地**，空地留在 `remainingLandIds` 交给后续种子或第二优先策略立即按 1×1 种植。预留成功时日志带剩余期限秒数。整轮状态签名不变时直接复用上一轮「无动作」结论，**连背包 / 商店 / 种植请求都不发**；每 30 秒强制重查一次以免漏掉新增背包种子，且等待组一旦越过硬期限立即放行去释放。手动「一键种植」通过 `force` 跳过闸门，重复点击仍会真的重试。种植失败按布局组记 30 秒冷却。`scheduler.ts` 的「预留 N」不再计入 `hadWork` —— 之前它会让上层误判本轮有进展并提前拉起下一轮巡田，是高频重复请求的放大器。
+- **效果**：远期成熟 / 未知阶段 / 非末季的组合不再囤地；合格组合最多等 60 秒，到期释放给普通种植；同一停滞组合不会反复圈地，只有出现新播种周期才重开窗口；状态不变时整轮短路。老版本「最早清空优先」「完整空闲立即立种」「过期释放标记不挡立种」等规格均保留。
+- **验证**：新增 `core/tests/reservation-window.test.js`（22 项，覆盖清空时刻、60 秒边界、多季末季、footprint 排除、释放标记与新周期、多组独立期限、冷却、整轮闸门、选组排序、接线静态断言）；更新 `core/tests/planting-log-throttle.test.js` 的整轮合并接线断言以匹配新入口结构。最终 core **452/452**、web **141/141**，改动文件 ESLint、`core tsc --noEmit`、`vue-tsc -b`、`vite build` 全通过。
+- **边界**：本轮只改后端策略，需**重启服务 / 重建镜像**后生效；环境无运行中服务与真机协议实测。整轮闸门最多延迟 30 秒感知背包新增种子；`getAllLands()` 的巡田主请求仍按原节奏保留（成熟 / 可偷 / 通知都要靠它），被消掉的是种植分支里的 `Bag` / 商店 / `Plant` 重复请求。
+
+### 2026-11-10 · v3.10.2（#100） · 去除定时重登 + 账号保活卡片改名合并 + 修复种植日志合并
+
+- **需求**：去掉「定时重登」开关与整套功能；把卡片下方独立的「服务启动自动登录」并入卡片内部；给卡片重新取一个贴切名称；另外反馈「背包种子执行顺序 / size=... allLayouts=... / 已预留空地等待布局」三条日志虽带「（同样状态重复 13 次，已合并）」但仍在刷屏，要求日志合并真正生效。
+- **定时重登整体下线**：`core/src/config/config.ts` 的 `AutoCodeRefreshConfig` 删掉 `enabled` / `intervalMinutes` 与默认值，`normalizeAutoCodeRefresh()` 会直接丢弃旧 `store.json` 里残留的这两个字段；`core/src/types/config.ts`、`web/src/stores/setting.ts` 的类型与默认同步收敛为只有 `offlineEnabled` / `offlineDelaySeconds`。`core/src/services/wx-keepalive.ts` 移除 `tick()` 里按间隔遍历续期重启的分支、`lastRefreshAt`、`'timer'` reason；30 秒巡检现在只跑常开的 `runCodePreflight()`（到期前预防续期），掉线重登完全不受影响。`applyWxKeepAliveConfig()` 改为只记录当前生效策略。
+- **卡片改名与合并**：账号管理页该分区由「账号保活」更名为 **「账号登录与重连」**（分区标题 / 卡片标题 / 配置弹窗标题 / 状态文案一致），对应三项能力：服务启动自动登录、掉线自动重登、微信授权到期前常开续期。`AccountSettingsCard.vue` 新增 `#extra` 插槽和 `hideSwitch`：卡片内部自带两个具名开关后，隐藏右上角含义不清的总开关；原先卡片下方那条灰底「服务启动自动登录」整块删除，改为卡片内的具名行。状态标签同时展示两项开关状态与「到期前自动续期 常开」。配置弹窗只保留「掉线后等待（秒）」，不再出现任何定时重登控件。
+- **日志合并为什么之前没生效**：旧实现给四类诊断各自按「key + 状态签名」做 5 分钟窗口节流，窗口到期会**各自重新播报一次**，于是每个 5 分钟窗口开头又同时冒出三条带「同样状态重复 13 次，已合并」的日志；三条内容不同，前端 `compactRuntimeLogs` 也合不到一起，看起来就像没合并。
+- **修复**：`planting-log-throttle.ts` 新增 `checkStateChange()`（状态变化才放行，不做周期性重新播报）；`planting.ts` 用 `plantFromBagSeeds()` 包一层 `try/finally`，把**一轮巡查内的全部诊断先缓存**，收尾时合成一个整轮签名、只输出**一条**合并日志（正文最多带前 5 条，完整明细在 `meta.diagnostics`），状态不变就一条都不写前端面板；提前 return / 抛错 / 嵌套调用都有兜底。前端 `runtime-log.ts` 的 `repeatSignature()` 剥掉「（同样状态重复 N 次，已合并）」后缀再比较，避免计数不同把同一状态当成两条。
+- **测试与验证**：新增 `web/tests/account-online-card.test.mjs`（5 项）与 `web/tests/runtime-log-merge.test.mjs`（2 项）；扩展 `core/tests/planting-log-throttle.test.js`（+2 项状态变化用例 + 整轮合并接线断言）与 `core/tests/code-preflight.test.js`（定时重登链路移除断言）。顺手修掉 `config.ts` 里 `^(0|false|no|off)$` 的未使用捕获组 ESLint 报错（改为非捕获组，行为不变）。最终 core **430/430**、web **141/141**，改动文件 ESLint、`core tsc --noEmit`、`vue-tsc -b`、`vite build` 全通过。
+- **边界**：旧配置里保存过「定时重登已开启」的账号升级后该字段自动失效，无需手动改 `store.json`；掉线重登与到期前预防续期的开关状态不受影响。日志合并为运行期行为，需重启服务（重建前端镜像并强刷浏览器）后生效；环境无运行中服务 / 真机协议实测。
+
+### 2026-11-10 · v3.10.1（#99） · 日熔断额度改为只统计失败，成功续期不再占用额度
+
+- **需求**：`v3.10.0` 把老版本「日 8 次」原样用在常规预防续期上，但凭证按 2 小时滚动时一个账号一天可能触发十几次，成功也占额度会导致当天后段被误熔断，反而更容易 Code 过期。要求改为「只有失败才计数、成功不占额度」。
+- **改动**（`core/src/services/wx-keepalive.ts`）：`PreflightState.attempts` 改为 `failuresToday`（当日累计失败次数），常量 `MAX_DAILY_PREFLIGHT` 更名为 `MAX_DAILY_PREFLIGHT_FAILURES`；`recordAttempt()` 不再累加额度，只记 `lastAttemptAt` 保留两次续期之间 5 分钟最短间隔（防止 `expires_at` 未写回时每 30 秒狂刷一次性刷新凭证）；额度改由 `recordFailure()` 累加，`recordSuccess()` 只清零连续失败、不动日额度。启动日志文案同步改为「当日失败上限 8 次（成功不占额度）」。
+- **效果**：成功的常规预防续期不再有次数上限，只要凭证按时写回 `expires_at` 就能一直工作；只有当日累计 8 次失败、连续 3 次失败或凭证明确失效才会熔断，北京时间零点换日重置。连续失败 3 次与「穿插成功的累计 8 次失败」是两条独立的刹车。
+- **验证**：`core/tests/code-preflight.test.js` 14 → 16 项，新增「连续 12 次成功不消耗任何日额度」的 governor 单测与端到端用例（旧逻辑第 9 次就会被拦下），日上限用例改为「8 次失败 + 穿插成功不减免」，接线断言补静态守卫防止 `recordAttempt` 再次占用额度。core 428/428、web 134/134，改动文件 ESLint、`core tsc --noEmit`、`vue-tsc -b`、`vite build` 全通过。
+
+### 2026-11-10 · v3.10.0（#98） · 参考老版本优化 Code 续期：后端自主到期前预防性续期 + 失败熔断
+
+- **需求**：现版本仍容易 Code 过期，要求参考老版本（`legacy-qq-farm-bot-20261101.bundle`，HEAD `e8edb59`）优化。
+- **根因**：现版本后端唯一的自主定时器 `wx-keepalive` 默认「定时重登 / 掉线重登」全关（`autoCodeRefresh.enabled=false`）；真正会换 Code 的 `autoFixAccountCode` 由前端驱动——侧栏每 10 秒只拉健康快照，必须打开「账号管理」页，`watch(codeAlerts)` 才会 `POST /auto-fix-code`。关掉浏览器或停在别的页面，后端完全不会主动续期；补码还是事后的（已过期 / 掉线），且带 10 分钟节流 + 失败即永久停用。老版本相反：`auto-code-refresh` 是后端 scheduler 自主跑，60 秒一查、`onlyIfDue` 只在到期前 45 分钟滚动续期。
+- **做法（只借鉴调度与保护，不搬整套 `auto-code-refresh`）**：老版本那套存在已核实的断链（`prepareRestartCode` / `isRestartGenerationCurrent` 引用未定义变量、`wx-login-adapter` 调用未定义函数、`POST /api/settings/auto-code-refresh` 返回 410），因此只移植机制，执行器复用现版本更稳的 `refreshAccountCredential`（同账号串行锁、滚动 token 落盘、`expires_at` 写回）。
+- **实现**（`core/src/services/wx-keepalive.ts`）：在现有 30 秒巡检里新增**不受 `config.enabled` 控制、默认常开**的 `runCodePreflight()`——按 `code-watch.inspectAccountCodeHealth` 的 `remainingMs` 判定，只在到期前 45 分钟（`PREFLIGHT_WINDOW_MS`）对**运行中**的微信账号滚动续期，成功后 `restartWorker` 立刻用新 Code 上线；成功会写回新 `expires_at`，天然脱离预警窗口，不会每轮重复刷新。与「定时重登」共享 `inFlight` / `lastRefreshAt` / 账号串行锁，避免重复消耗一次性 `refreshtoken`。
+- **熔断（移植老版本）**：`createPreflightGovernor()` 按 UTC+8 自然日限制单账号日 8 次（`MAX_DAILY_PREFLIGHT`）、连续失败 3 次（`MAX_CONSECUTIVE_FAILURES`）熔断、失败后 5 分钟冷却（`PREFLIGHT_RETRY_MS`，对齐老版 `WX_CREDENTIAL_RETRY_MS`）；错误含「重新扫码 / 凭证失效 / token expired」直接熔断到换日；成功清零连续失败。只续期运行中账号，等价于老版本 `versions` 代次锁 / `manuallyStopped`，**不会把用户手动停止的账号拉起**。新增账号日志 `auto_code_preflight` / `auto_code_preflight_failed`，与既有 `auto_code_refresh` 区分便于诊断。
+- **配套修复**：`code-watch.ts` 的 `OFFLINE_LOG_ACTIONS` 加入 `ws_400` 与 `auto_code_preflight_failed`。原先集合里的 `login_failed` 全仓没有写入点，而 worker-manager 在 WS 400（登录失效，请更新 Code）时实际写的是 `ws_400`，导致这条最直接的 Code 失效信号被忽略，只能等后续 `disconnect_stop` 才被识别。
+- **边界**：只对具备 `wxid + refreshtoken` 的微信账号生效；扫码时未回传 `refreshtoken`、仅有 `loginBuffer` 的账号无法滚动续期，仍需重新扫码。QQ 没有长效凭证与到期时间，无法做「到期前续期」，保留现有启动前尽力重签与前端掉线兜底。前端「Code 自动监听」完整保留，与后端形成「到期前预防 + 掉线后兜底」双保险；未新增 UI 开关、未引入 Bark 外推、未改账号日志落盘策略。
+- **验证**：新增 `core/tests/code-preflight.test.js` 14 项（阈值 / `isCredentialDue` 秒毫秒兼容 / 冷却与三种熔断 / 换日重置 / 默认配置关闭仍触发 / 成功后不重刷 / onlyIfDue / 不拉起停止账号 / 缺 refreshtoken 跳过 / 失败冷却 / inFlight 去重 / 接线与 `ws_400` 断言）；core 426/426、web 134/134，改动文件 ESLint、`core tsc --noEmit`、`vue-tsc -b`、`vite build` 全通过。
+- 说明：预防性续期成功后会重启运行中的微信账号（约每 2 小时一次，随凭证到期时间推进），属预期行为；无浏览器 / 真机与运行中服务的协议实测，部署需重新构建前端 / 重建 Docker 镜像并强刷浏览器。
+
+### 2026-11-10 · v3.9.6（#97） · 回滚「去除账号管理内 Code 自动监听」，恢复完整链路
+
+- **需求**：回滚上一次（`v3.9.5 · #96`）的移除，账号管理内 Code 过期自动监听与自动补 Code 恢复到 `v3.9.3 · #95` 时的完整状态。
+- **做法**：改动已推送到远端，因此不重写历史，改为新的回滚提交。以 `7c008d1`（`v3.9.3 · #95`）为基准恢复 7 个文件；删除上一轮新增的 `web/tests/code-watch-removed.test.mjs`。版本文件与 `#96` 历史记录按版本体系保留，本次回滚本身作为一次新更新继续递增。
+- **恢复内容**：`AccountManagementPanel.vue` 的「Code 自动监听」卡片与 `codeAlerts` watch / 10 分钟节流 / 失败停用 / 立即补 Code；`Sidebar.vue` 挂载与 10 秒轮询的 `fetchCodeHealth()`；`stores/account.ts` 的 `CodeHealthItem`、健康快照状态、`fetchCodeHealth()` / `autoFixCode()`；`account-routes.ts` 的 `GET /api/accounts/code-health`、`POST /api/accounts/:id/auto-fix-code` 与 `buildProviderCodeHealth()`；`core/src/services/code-watch.ts`；`core/tests/code-watch.test.js` 与 `web/tests/code-health.test.mjs` 两套正向回归测试。
+- **验证**：core / web 全量测试回到移除前的通过数，改动文件 ESLint、`vue-tsc -b`、`core tsc --noEmit`、`vite build` 全通过；构建产物重新包含「Code 自动监听」卡片文案与健康快照接口路径。
+- 说明：`#96` 的移除记录作为历史保留，代码状态以其之前为准；部署需重新 build 前端 / 重建镜像并强刷浏览器。
+
+### 2026-11-10 · v3.9.5（#96） · 去除账号管理内 Code 自动监听
+
+- **需求**：账号管理页不再进行 Code 过期自动监听与自动补码。本次按整条功能链路移除，手动补 Code、扫码登录、微信授权续期等原有能力保持不变。
+- **前端**：`AccountManagementPanel.vue` 删除「Code 自动监听」卡片（异常账号列表 / 自动补 Code / 立即补 Code / 每 10 秒检查标签）及配套的 `codeAlerts` watch、10 分钟节流、失败停用与弹窗提示逻辑；`Sidebar.vue` 的挂载与 10 秒轮询不再调用 `fetchCodeHealth()`，仅保留账号列表与运行状态刷新；`stores/account.ts` 删除 `CodeHealthItem`、`codeHealth` / `codeHealthLoaded` 状态、`fetchCodeHealth()` 与 `autoFixCode()`。
+- **后端**：`account-routes.ts` 删除 `GET /api/accounts/code-health`、`POST /api/accounts/:id/auto-fix-code` 两个路由及 `buildProviderCodeHealth()`；删除 `core/src/services/code-watch.ts`（微信凭证到期 / QQ 掉线判定、自动换码与重签、补码日志与局内通知写入）。账号 CRUD、账号日志、备注、设置、启动前续期 Code（`auto_code_refresh_failed`）与局内通知服务本身均未改动。
+- **保留的手动通道**：账号卡片「编辑」按钮打开的 `AccountModal` 仍可重新扫码或填写新 Code；顶部「续期全部微信授权」与「添加账号」照常可用。
+- **测试**：删除 `core/tests/code-watch.test.js`；将 `web/tests/code-health.test.mjs` 重写为 `web/tests/code-watch-removed.test.mjs` 负向守卫（6 项），断言前后端源码、状态、轮询、路由不再含自动监听痕迹，且服务文件与旧测试已删除、手动能力仍在。
+- **验证**：core / web 全量测试、改动文件 ESLint、`vue-tsc -b`、`vite build` 全通过；构建产物不含已移除的卡片文案与接口路径。
+
+### 2026-11-09 · v3.9.3（#95） · 手机端头像放大到与三行文字等高（PC 端不变）
+
+- **需求**：PC 端两行文字配 52px 头像大小合适；手机端文字是三行（名称 / 在线 / 已运行），52px 头像显得偏小。要求只在手机端把头像高度调到与文字块一致，PC 端完全不动。
+- **实测尺寸**：用无头浏览器按真实 CSS 测量，PC 两行文字块高 **51.3px**（对应 52px 头像），手机三行高 **71.8px**（名称 24.3 + 间距 5 + 在线 22 + 行间距 4 + 已运行 16.5）。因此手机端头像取 **72px**，沿用 PC 端「头像≈文字块高度」的规律。
+- **实现**：仅在 `@media (max-width: 639px)` 内定义 `--ov-avatar-size: 72px`，`.ov-avatar` 宽高同值（仍是正圆）、占位图标 26→34px；在线点 `right/bottom: 0 → 3px`，贴合放大后的圆周；给文字块加语义类 `ov-account__info` 并设 `min-height: var(--ov-avatar-size)`，与头像共用同一变量。基础规则保持 52×52 / `border-radius: 999px`，`≥768px` / `≥1280px` 断点没有头像覆盖。
+- **防挤压**：头像加宽 20px 后文字区变窄，实测「已运行 03:34:40」会被挤成第四行、文字块涨到 **88.3px**（反而更不匹配）。因此手机端同步把 `.ov-account__head` 间距 14→10px、`.ov-presence` / `.ov-presence__meta` 列间距 10→6px，并给 `.ov-presence__item` 加 `white-space: nowrap`、`.ov-presence__meta` 加 `overflow: hidden`。375px 宽度下文字仍是三行、不换行、不与「我的农场」按钮重叠；更窄屏幕超出部分裁切而不撑高文字块。
+- **验证**：新增 `web/tests/dashboard-avatar-mobile.test.mjs` 4 项（PC 端 52px 不变 / 手机 72px 与文字等高且正圆 / 在线点贴圆周 / 间距与防折行守卫）；用无头 Edge 生成 PC / 手机对照截图，确认头像与文字块上下对齐、保持正圆、绿点贴圆周、文字无截断或重叠。web / core 测试、改动文件 ESLint、`vue-tsc -b`、`vite build` 全通过。
+- 说明：对照截图是按真实 CSS 静态还原的预览图，不是运行中服务的真实页面；版本号为构建时注入常量，部署需重新 build 前端 / 重建 Docker 镜像并强刷浏览器。
+
+### 2026-11-09 · v3.9.2（#93） · 首页头像改为圆形 + 全站头像风格统一
+
+- **形状**：首页「在线状态」卡片的 52×52 头像由圆角方形（`border-radius: 16px`）改为正圆（`999px`）；头像图片沿用 `object-fit: cover` 与 `border-radius: inherit`，自动裁成圆形，加载失败时的占位图标保持不变。
+- **风格统一**：与右上角账号菜单（`rounded-full` + `ring-1`）、个人页弹窗（`rounded-full` + `ring-2`）的圆形头像对齐，补一圈 `0 0 0 1px var(--ui-border)` 主题细描边，浅色 / 深色模式都跟随主题变量；hover 时细描边与主色外圈叠加显示，focus-visible 主色描边、disabled 态和原有点击行为不变。
+- **在线小圆点**：正圆没有方角，状态点从 `right / bottom: -3px`（角外）移到 `right / bottom: 0`，贴在右下 45° 圆周上；保留 3px 卡片底色描边和在线绿色，看起来与其他圆形头像的状态标识一致。
+- **布局不变**：头像尺寸、grid 居中、「我的农场」入口、账号名 / 在线 / 已运行信息以及 PC / 手机端断点样式均未改动；右上角账号菜单仍只负责切换 / 管理账号，个人页入口仍只有首页头像。
+- **测试**：`web/tests/account-career-modal.test.mjs` 更新「尺寸与布局」断言并新增「圆形头像风格统一」用例，校验正圆半径、细描边、hover 叠加、图片裁剪、状态点贴圆周，并对照账号菜单与个人页弹窗的圆形样式；web 130 项、core 412 项全通过，ESLint、vue-tsc、vite build 通过。
+- 说明：界面为静态断言 + 构建验证，无浏览器 / 真机实测；部署后需重新构建 Docker 镜像或强刷浏览器缓存查看效果。
+
+### 2026-11-09 · v3.9.1（#92） · 修正版本测试的待发布记录与一次性迁移说明断言
+
+- post-commit hook 递增版本时调用 `renderVersionSection()` 重渲染「版本总览」规则说明，迁移脚本追加在规则行末尾的「本次由 `scripts/rebuild-version-history.mjs` 全量重算」属于一次性说明，会被覆盖；`web/tests/version.test.mjs` 改为校验迁移脚本本身存在且引用 `BASELINE_META`，不再要求 CHANGELOG 持久化这句话。
+- 「已发布记录都带版本号」断言改为识别提交前的中间态：写更新日志时最新一条还没提交，版本号与总览表行由 hook 补上，因此只要求已发布记录与总览表一一对应，避免每次新增记录后、递增前误报。
+
+### 2026-11-09 · v3.9.0（#91） · 移植老版本个人页（角色生涯）+ 入口改为首页头像
+
+- **入口调整**：老版本从右上角账号头像打开的个人页，这次移植后**只从首页「在线状态」卡片里的头像打开**；右上角账号菜单保持原来的「切换 / 管理账号」用途，不新增入口。首页头像由 `div` 改为 `button`，保留 52×52 尺寸、圆角、在线小圆点与图片加载失败回退，只增加 hover / 焦点反馈；PC 与手机端布局不变，「我的农场」入口不受影响。
+- **个人页内容**：移植老版本 `AccountCareerModal.vue` 的完整结构 —— 角色头像 / 名称 / 等级 / 经验 / 角色编号、「历史累计收获」「摘取好友作物（官方生涯统计）」两张汇总卡（紧凑数值 + 精确数量悬浮提示）、收获 Top3 与全部收获明细网格，以及加载中、读取失败与「重新加载」状态；沿用 `useModalFocus` 的焦点、Esc 关闭与背景锁定。账号切换时若弹窗仍打开会自动刷新数据。
+- **后端补齐**：当前仓库原本只有给偷菜过滤用的简版 `getCareerInfo()`（仅收获 / 偷菜总数）。现在 `core/src/services/career.ts` 拆分出 `requestCareerReply()` 与纯函数 `buildCareerProfile()`，按 `careerpb.proto` 解析 `harvest_items`、`total_harvest_count`、`total_steal_count`、`avatar_url`、`exp`、`gid`、`platform`、`open_id`，并用 `gameConfig` 把果实 ID 映射成作物名与图标；简版接口行为不变。新增 `GET /api/career`（`admin/career-routes.ts`），经 `data-provider → worker.handleApiCall('getCareerProfile')` 按当前账号自己的 GID 拉取，前端 `x-account-id` 由 api 拦截器自动带上。
+- **素材**：沿用仓库已有的 `web/public/game-config/career/harvest.png` / `steal.png`。
+- **测试**：新增 `core/tests/career-profile.test.js`（5 项：真实执行 `buildCareerProfile` 验证字段映射 / 作物名兜底 / 驼峰与空回包、proto 字段、路由与 provider / worker 接线及挂载顺序）与 `web/tests/account-career-modal.test.mjs`（3 项：弹窗数据区与状态、入口唯一性与首页头像可点击、样式与原有布局保持）。
+- 说明：生涯数据来自游戏官方协议，账号未运行或未连接时接口会报错，弹窗内可点「重新加载」重试；无浏览器 / 真机实测，界面为静态断言 + 构建验证。
+
+### 2026-11-09 · v3.8.5（#90） · 版本号与更新次数自动跳过数字 4
+
+- **规则**：`scripts/version.mjs` 新增 `SKIPPED_DIGIT = '4'` / `containsSkippedDigit()` / `nextAllowedNumber()`，返回不小于目标值的最小不含 `4` 的整数。递增时版本号的 `MAJOR` / `MINOR` / `PATCH` 三段与累计更新次数 `build` 统一走该函数，十进制表示中任意位置含 `4` 都自动跳过：`4 → 5`、`14 → 15`、`39 → 50`、`400 → 500`。
+- **覆盖范围**：`version.json`、根 / `core` / `web` 三个 `package.json`、`web/version.json` 镜像、侧栏与登录页版本标签、版本总览表与详细记录标题，全部由同一个 `bumpVersion()` 结果生成，因此版本号、更新次数、日志序号都不会出现 `4`。归零的段（`0`）本身合法；历史或手工写入的含 `4` 段在下次递增时也会被修正。
+- **生效时点**：按「以后」的要求自本次更新起生效；此前已发布的 `v2.9.3（#4）` 等历史记录原样保留、不追溯改写。本次提交由 hook 自动递增后，从 `v2.9.3 · 第 4 次更新` 跳到 `v2.9.5 · 第 5 次更新`（`PATCH` 与序号都跳过 `4`）。
+- **测试**：`web/tests/version.test.mjs` 新增工具函数边界（个位 / 十位 / 整段区间 / 负数）、三段与序号的跳过用例、连续 200 次递增无 `4`、CLI 端到端（含跨 `14` 区间的 10 次连续递增与 `history` 全量校验）、规则说明与递增链静态断言。
+
+### 2026-11-09 · v3.8.3（#89） · 修复「游戏商城」页签被弹回神秘商人 + 默认页签作用域收窄
+
+- **问题**：`GameMall.vue` 的 `activeTab` 白名单只列了 `limited / mystery / svip / props`，漏掉 `mall`；上轮把 `DEFAULT_TAB` 改成 `mystery` 后，点「游戏商城」页签写入 `?tab=mall` 识别不了，回退成默认神秘商人，表现为点了没反应。
+- **修复**：`activeTab` 改用完整 `TAB_KEYS` 集合（与页签数组同源、5 个页签全覆盖），任何合法 `?tab=` 都按参数切换；`DEFAULT_TAB` 恢复 `mall`，直接打开 `/game-mall` 时是游戏商城。
+- **默认神秘商人只作用于导航入口**：`menu.ts` 的 `game-mall` 菜单项新增 `defaultTab: 'mystery'`，新增 `menuLink()` 让侧栏 / 手机端导航链接带 `?tab=mystery`；`menuPath()` 仍返回纯路径供菜单高亮与面包屑比对。于是点侧栏「农场商城」→ 神秘商人，而页面内任何页签点击（含游戏商城）都按点击结果显示，不再被强制回神秘商人。旧 `/mystery-shop` 重定向保持不变。
+- **测试**：`mall-tab-order.test.mjs` 断言白名单与页签数组完全一致；`mall-mystery.test.mjs` 新增入口作用域与「游戏商城可正常进入」断言。
+
+### 2026-11-09 · v3.8.2（#88） · 修复容器部署时首页显示「第 0 次更新」
+
+- **根因**：`core/Dockerfile` 的 `web-builder` 阶段只 `COPY web ./web`，没有把仓库根 `version.json`（版本号单一真源）拷进镜像；`web/vite.config.ts` 读不到它时回退 `build: 0`，侧栏 / 登录页于是显示 `v2.9.1 · 第 0 次更新`。本地直接构建有根文件所以正常，只有容器构建会复现。
+- **Docker 补齐**：`web-builder` 阶段新增 `COPY version.json ./version.json`；版本每次递增让该层缓存失效，正是期望行为（版本号必须随镜像重建）。
+- **web 目录镜像兜底**：`scripts/version.mjs` 每次递增同步写 `web/version.json`（`version` / `build` / `label` / `updatedAt`），并纳入 `VERSION_FILES` 随版本提交一起更新；`vite.config.ts` 优先读根 `version.json`，读不到再读 `web/version.json`，只分发 `web/` 目录的构建方式也不会丢次数。
+- **回退不再产生 0**：版本号与更新次数统一由同一份 meta 计算；完全读不到版本文件时只显示 `vX.Y.Z`（不显示次数）、`__APP_BUILD__` 为空串，不再出现无效的「第 0 次更新」。
+- **测试与验证**：`web/tests/version.test.mjs` 新增镜像渲染 / 真源一致性 / 回退链 / Dockerfile 断言，CLI 端到端用例验证连续两次递增都会同步镜像；另实测三种构建场景（根版本文件存在、仅 web 镜像、两者皆无）的产物标签。
+
+### 2026-11-09 · v3.8.1（#87） · 快成熟判定默认值改回 300 秒 + 阈值命中率模拟结论
+
+- **默认值 60 → 300 秒全链路同步**：按用户决定把上一轮的默认值改回 300 秒 —— `shared-state.ts` 默认值与 clamp 回退、`account-config.ts` 回退、`planting.ts` 的 `|| 300`、`land-analysis.ts` 的 `getFastMatureLands` 默认阈值、设置页 3 处默认值与 1 处未定义兜底、功能模块「快成熟判定」显示回退及说明文案。30~3600 秒可调范围不变；用户已保存的配置不会被自动覆盖。
+- **改回依据（阈值命中率模拟）**：`scripts/simulate-fertilizer-threshold.mjs` 按 `worker.ts` 真实调度建模（两轮巡查间隔 = 本轮工作耗时 + 20~25 秒随机），每场景 20 万株并换种子复核。常规负载（平均周期 22.5 / 27.5 / 39 秒）下 60 秒与 300 秒命中率都是 100%、有机肥消耗完全相同，调小阈值并不省肥；繁忙（65 秒）时 60 秒降到 88.8%、拥堵 / 退避（112.6 秒）降到 53.5%，而 300 秒始终 100%。以「缩短成熟后等待收获的被偷窗口」为优先，回到 300 秒。同时修正上轮「300 秒每株多耗约 5 分钟有机肥」的粗估：常规负载下两者消耗相同，极端拥堵时 300 秒最多约 57.6 秒 / 株。
+- **`land-analysis.ts` 兜底一致性**：`getFastMatureLands` 函数签名默认值回到 300，与函数体内 `toNum(thresholdSec) || 300` 兜底一致（上轮签名改 60、兜底仍 300 的不一致随之消除）。
+- **设置页说明**：写明常规负载下 60 / 300 秒有机肥消耗相同、巡查周期变长时 300 秒仍能保证催熟命中的结论；旧账号若手动改过 60 秒需改回 300 秒。
+- **测试与验证**：`core/tests/fertilizer-smart-fixed.test.js` 4 项断言全部改回 300 秒并补充兜底一致性与文案断言，`web/tests/version.test.mjs` 的默认值断言同步；core / web 全量测试、类型检查、改动文件 ESLint、`vite build` 通过。
+
+### 2026-11-09 · v3.8.0（#86） · 新增版本号功能 + 快成熟判定默认值改为 60 秒
+
+- **版本号单一真源 `version.json`**：仓库根新增版本文件，记录 `MAJOR.MINOR.PATCH`、累计更新次数 `build`、更新时间、最近提交与完整 `history`；根 / `core` / `web` 三个 `package.json` 的 `version` 由脚本统一同步（原来是静态日期串 `20261104`，从不递增）。基线从历史版本 `v2.8.0` 起算。
+- **`scripts/version.mjs` 按「更新内容 + 更新次数」递增**：新增功能（`feat` / 新增 / 移植 / 上线等）→ `MINOR` 进 1、`PATCH` 归零；修复 / 优化 / 回滚 / 去除 → `PATCH` 进 1；重大不兼容变更 → `MAJOR` 进 1（手动 `--type major`）。无论哪类，累计更新次数 `build` 每次都 +1。支持 `--message` / `--type` / `--dry-run` / `--root`，`pnpm version:show` 查看当前版本、`pnpm version:bump` 手动递增。
+- **每次提交后自动递增**：新增 `.githooks/post-commit`，执行 `pnpm hooks:install` 后（`git config core.hooksPath .githooks`）每次提交自动运行 `bump --from-commit --auto-commit`，生成 `chore(version): vX.Y.Z · 第 N 次更新` 提交；hook 对版本提交本身、以及已带 `version.json` 的手动 bump 提交做了去重，不会递归或重复递增。
+- **更新日志带上版本号**：`docs/CHANGELOG.md` 顶部新增「版本总览」表（版本 / 更新序号 / 日期 / 更新内容 / 提交），每次递增自动加一行并写明规则；「详细记录」里最新一条未标记的标题自动带上 `vX.Y.Z（#N）`，历史记录保持原样、不编造旧版本号。
+- **界面版本号显示**：`vite.config.ts` 由 `version.json` 注入 `__APP_VERSION_LABEL__` / `__APP_BUILD__`，侧栏底部从 `v20261104` 改为 `v2.9.0 · 第 1 次更新`，登录页底部同步显示；构建时读不到版本文件会安全降级。
+- **快成熟判定默认值 300 → 60 秒**：按上一轮化肥分析结论（巡查间隔 20~25 秒、有机肥按剩余生长时间精确扣费）把推荐值落到默认配置 —— `shared-state.ts` 默认值与 clamp 回退、`account-config.ts` 回退、`planting.ts` 的 `|| 60`、`land-analysis.ts` 的 `getFastMatureLands` 默认阈值、设置页 4 处默认值、功能模块「快成熟判定」显示回退与说明文案全部同步。30~3600 秒可调范围不变；旧账号若之前保存过 300 秒，需在该输入框手动改成 60 秒（不擅自覆盖用户已保存的配置）。
+- **测试与验证**：新增 `web/tests/version.test.mjs`（版本判定 / 递增 / CHANGELOG 渲染 / CLI 端到端 / 接线静态断言），重写 `core/tests/fertilizer-smart-fixed.test.js` 覆盖前后端默认值 60 秒；版本号与更新日志由脚本真实运行生成，非手写。
+
+### 2026-11-09 · v3.7.2（#85） · 首页诊断移除 + 快成熟回滚 + 神秘商人来访横幅 + 日志刷屏治理 + 奶茶支撑时间修正
+
+- **首页运行诊断模块整体移除**：按用户要求把上一提交完整回滚 —— `RuntimeDiagnosticsCard.vue`、前后端 `runtime-diagnostics` 服务 / 路由 / store / utils、`scheduler` 与 `worker` 埋点及对应测试全部删除，首页右侧列恢复「自动巡查 → 今日统计」。
+- **快成熟判定回滚为固定秒数**：撤销 300 内随机化，`land-analysis.ts` 移除 `pickSmartMatureThreshold` / `SMART_MATURE_RANDOM_CAP_SEC`，`planting.ts` 恢复 `toNum(automation.fertilizer_smart_seconds) || 300`，设置页说明改回「固定秒数」，删除随机化测试并补固定阈值回归。
+- **去除右上角红点通知**：顶栏不再挂载 `PanelNotificationBell`（含未读红点角标），组件删除；后端 `/api/panel-notifications` 与 store 保留，避免牵连自动补码失败 / 自动购买事件的写入。神秘商人提示改由商城页内横幅承担。
+- **手机端运行日志筛选**：「所有事件」下拉由独占整行（`grid-column: 1 / -1`）改为与「所有模块」同列同宽（`grid-column: 1`），PC / 宽容器布局不变；同步更新旧断言。
+- **农场商城**：默认页签改为「神秘商人」（无 query 时回退 `DEFAULT_TAB`，切回默认页不写 query）；PC 端（≥761px）「购买历史」去掉 `max-width: 760px`，与「神秘商人暂未来访」空状态卡片等宽，手机端保持原样。
+- **神秘商人来访横幅**：新增 `MysteryArrivalBanner.vue`，只在商城页顶部显示。样式参考老版本 `CommerceShopBar` 的 `is-violet` 状态条与 `shop-message` 提示条；运行逻辑参考老版本 `visitKey` 去重：有商人来访、本轮按 `npcId + activeTime` 查不到购买记录、且未到 `expireTime` 时显示货品与离开倒计时；购买后本轮不再提示，商人离开或新一轮来访重新判定。不写局内消息、不发外部推送。停在其它页签时商城页每 30 秒拉一次来访状态与购买历史。
+- **种植日志刷屏治理**：新增 `planting-log-throttle.ts`，按「key + 状态签名」5 分钟窗口节流；`背包种子执行顺序`、`size=... allLayouts=... selected=...`、`已预留空地...等待布局`、`已跳过` 四类日志同一状态只输出一次，被合并的轮数在下一条日志里带出「（同样状态重复 N 次，已合并）」，状态变化立即放行。
+- **奶茶「高级库存预计支撑至」修正**：`teaInventoryEstimate` 原来用 `Math.min(rawUntil, settleTime)` 把支撑时间截断到营业结算，导致 15,991 杯与 82,097 杯都显示「5天18小时57分后」。改为按「库存 ÷ `effective_cups_per_hour`」如实返回 `seconds` / `until`，`capped` 只标记「超过本次营业截止」，面板直接展示可售秒数并在超限时提示「营业结束后不再销售」。
+- **化肥与阈值分析（只读结论，未改默认配置）**：`ItemInfo.json` 1011 普通化肥「仅限单阶段无限施肥」、每季每株 1 次（`left_inorc_fert_times`）；`Plant.json` 318 种作物第一段（种子期）最长 17,280 秒 = **4 小时 48 分**，即普通化肥单次最多催熟约 4.8 小时。跨阶段必须靠有机肥（1012 不限次数），`ripen-all.ts` 按阶段秒数累计消耗印证「扣多少生长时间就耗多少容器时长」。巡查间隔 20~25 秒、有机肥按剩余生长时间精确扣费，因此快成熟阈值建议 **60~120 秒（推荐 60 秒）**：≥2 倍巡查上限保证命中，每株只多耗 1~2 分钟有机肥；默认 300 秒命中率最高但每株多耗 5 分钟容器时间。被偷窗口由「成熟 → 收获」的巡查延迟（≤25 秒）决定，加大阈值并不能缩短它，防偷更有效的做法是把巡查间隔调小。
+- **测试与验证**：新增 core 12 项、web 11 项回归，更新 2 组旧断言；最终 core 406/406、web 106/106、`tsc`、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。环境无浏览器 / 真机，界面与配色为静态断言 + 构建验证。
+
+### 2026-11-08 · v3.7.1（#83） · 今日统计去掉单位「次」 + 账号管理 Code 过期自动监听与自动补码
 
 - **首页「今日统计」去掉数值后面的「次」**：金币、经验与各动作项三处 `<small>次</small>` 全部移除；数字、负数配色（`ov-today-gold.is-down`）与动作统计列表不变，运行日志「连续重复 N 次」文案不受影响。
 - **账号管理自动监听 Code 过期并补 Code**：
@@ -48,7 +352,7 @@ flowchart TB
 - **测试与验证**：新增 core 12 项、web 8 项；core 398/398、web 101/101、`tsc`、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。环境无浏览器 / 真机，界面与配色为静态断言 + 构建验证。
 - **上游「首页运行诊断模块」暂不移植**：核查 `liyangpengs/qq-farm-bot` master（HEAD `5bdc029`）首页只有账号/资产/库存、运行日志、下次巡查倒计时、今日统计，未发现独立的「运行诊断」模块；经用户确认本轮跳过。
 
-### 2026-11-08 · 快成熟判定随机化 + 图鉴每日自动领奖/补种与背包过滤 + 今日金币支持负数
+### 2026-11-08 · v3.7.0（#82） · 快成熟判定随机化 + 图鉴每日自动领奖/补种与背包过滤 + 今日金币支持负数
 
 - **「土地与施肥 → 快成熟判定」秒数改为 300 内随机**：原先 `fertilizer_smart_seconds`（默认 300、可配 30~3600）是固定阈值，每轮 smart 施肥都用同一个临界点。新增 `pickSmartMatureThreshold(configuredSec, random)`：每轮巡查在 `[1, min(配置值, 300)]` 内随机取一个整数秒，配置值只作为上限且封顶 300 秒；随机源可注入，便于回归测试。设置页加说明文字，输入框、单位换算、默认值 300、后端 clamp 范围全部不变。
 - **收藏图鉴自动化**（按用户确认同时做「后台每天检查一次」与「一键购买加背包判断」，两项都带开关）：
@@ -62,7 +366,7 @@ flowchart TB
 - **测试**：新增 core 11 项（`fertilizer-smart-threshold.test.js` 3 + `illustrated-auto.test.js` 8）、web 11 项（3 个文件），全部做过反向验证：固定阈值 / 恢复夹零 / 删开关各 fail 1，去掉背包过滤 fail 2，恢复后全绿。顺带修 `planting.ts` 一处既有未使用导入。
 - **验证**：core 386/386、web 93/93、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。环境无浏览器 / 真机，图鉴弹窗与负数配色为静态断言 + 构建验证，无截图。
 
-### 2026-11-07 · 运行日志筛选手机端显示完整 + 神秘商人页签移到第 4 + 催熟时间核查
+### 2026-11-07 · v3.6.1（#81） · 运行日志筛选手机端显示完整 + 神秘商人页签移到第 4 + 催熟时间核查
 
 - **首页运行日志「所有事件」按钮手机端显示不全**：`.dashboard-log-toolbar` 手机端是 `minmax(0, 1fr) minmax(0, 1fr) 32px` 三列，两个下拉各只分到约 140px，还要给常驻的 32px 重置按钮列让位，选中标签（「所有事件」以及较长的事件名）会被省略号截断。改为两列 `minmax(0, 1fr) 32px` + 显式 `grid-row` 重排：搜索独占第 1 行整宽、模块筛选与重置按钮第 2 行、**事件筛选独占第 3 行整行宽度**。两个 `BaseSelect` 各包一层带 class 的容器以便栅格定位；PC 端（`@container runtime-log (min-width: 640px)`）仍是一行四列，完全不变。手机端工具栏只比原来多一行。
 - **农场商城页签**：`GameMall.vue` 的 tabs 顺序把「神秘商人」从第 5 位移到**第 4 位**（游戏商城 → 限时商店 → 道具商店 → 神秘商人 → SVIP 专属商城）。`activeTab` 白名单、`MysteryShopPanel` 绑定与默认页签逻辑均不变。
@@ -74,7 +378,7 @@ flowchart TB
 - 新增 `web/tests/log-filter-mobile.test.mjs` 3 项、`web/tests/mall-tab-order.test.mjs` 2 项静态断言，均做过反向验证（改回旧三列 / 改回旧页签顺序各 fail 1）。
 - 验证：web **82/82**、core **375/375**、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。仍无浏览器/真机，手机端为静态断言 + 构建验证，没有截图。
 
-### 2026-11-07 · 新增面板内消息（局内通知）：顶栏铃铛 + 本地持久化
+### 2026-11-07 · v3.6.0（#80） · 新增面板内消息（局内通知）：顶栏铃铛 + 本地持久化
 
 - **口径澄清**：用户说的「购买通知」是**面板内就能看到的局内消息**，不是 Bark / 钉钉 / Webhook 外部推送。复查工作区三个老版本：`qq-farm-bot-404` / `_merge_src/dawn` 的设置页 `AutomationSettingsForm.vue` 有「到货提醒 / 购买提醒」开关，但代码明确走 `push_notify → sendConfiguredPush → Pushoo` 外部渠道；`legacy-...bundle` 旧版只有购买后的页面 toast 与购买历史。三个版本都没有独立通知中心。因此上一轮补的两个开关属于外部推送，本轮新建真正的局内消息能力。
 - **后端**：新增 `core/src/services/panel-notification.ts`，每账号一个 `data/panel_notifications/<id>.json`，保留最近 100 条；按 `dedupeKey` 去重，避免 10 分钟一轮的巡查反复刷同一条到货消息；损坏文件 / 空内容安全降级。新增 `GET /api/panel-notifications` + provider + 路由注册，读取失败只返回空列表、不打断面板。
@@ -83,7 +387,7 @@ flowchart TB
 - 新增 `core/tests/panel-notification.test.js` 5 项（账号隔离 / 去重 / 100 条 / 损坏文件 / 链路）+ `mystery-shop-switches.test.js` 1 项行为测试（提醒开关全关时 `push` 为空但 `event` 仍在），`web/tests/panel-notifications.test.mjs` 3 项（铃铛挂载 / 面板展示 / store 行为）；更新既有 `mystery-shop-notify.test.mjs` 的文案断言。web 断言已反向验证（移除铃铛时 fail 1）。
 - 验证：core **375/375**、web **77/77**、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。仍无浏览器/真机截图，纯静态断言 + 构建验证。
 
-### 2026-11-07 · 补齐神秘商人「到货提醒 / 购买通知」开关与保存后立即巡查
+### 2026-11-07 · v3.5.15（#79） · 补齐神秘商人「到货提醒 / 购买通知」开关与保存后立即巡查
 
 - **背景**：上一轮验证自动化开关时提到「购买通知」是附属开关，但复查发现这两个键（`mystery_shop_arrival_notify` / `mystery_shop_purchase_notify`）虽然后端链路完整、默认值与类型都在，**前端任何页面都没有开关控件**——功能模块「神秘商人」只有 4 个货币开关和模块总开关，`Settings.vue` 里也只是默认值。等于这两个开关永远为 `false`，通知从未真正发出过。
 - **后端链路（已存在，本轮确认）**：`mystery-shop-auto.ts` 的 `decideMysteryShopTick` / `resolveMysteryShopPushFlags` / `buildMysteryShopPush` 生成「神秘商人到货」「神秘商人已自动购买」消息 → `worker.ts` 的 `sendToMaster({ type: 'push_notify' })` → `worker-manager.ts` → `sendConfiguredPush` → `sendPushooMessage`。推送渠道与「设置 → 下线提醒」共用一套配置（`getOfflineReminder()`），**未配置渠道时只记日志、不会真正发出**。到货提醒本身会启动巡查（`isMysteryShopWatchEnabled` 认它），购买通知只在自动购买成功后才可能推送。
@@ -92,7 +396,7 @@ flowchart TB
 - 新增 `core/tests/mystery-shop-switches.test.js` 2 项（真实生成推送内容、去重与开关关闭；7 键变更检测 + 推送链路静态断言）与 `web/tests/mystery-shop-notify.test.mjs` 3 项（开关 UI / 摘要与模块状态 / 配置类型）；web 断言已反向验证（改掉 label 时 fail 1）。
 - 验证：core **369/369**、web **74/74**、`vue-tsc -b`、改动文件 ESLint、`vite build` 全通过。仍无浏览器/真机截图，纯静态断言 + 构建验证。
 
-### 2026-11-07 · 节令日历手机端可下滑 + 神秘商人购买历史回归 + 自动化开关验证
+### 2026-11-07 · v3.5.13（#78） · 节令日历手机端可下滑 + 神秘商人购买历史回归 + 自动化开关验证
 
 - **节令日历手机端无法下滑**：活动详情外壳 `.farm-page-content.is-activity-detail` 是 `overflow:hidden` + 子元素 `flex:1/min-height:0`，滚动必须交给页面自身；`SolarCalendar.vue` 的 `.solar` 只有 `width/min-width`，内容超出视口后被裁掉。给 `.solar` 补 `min-height:0 / overflow-y:auto / overscroll-behavior:contain / -webkit-overflow-scrolling:touch`，PC 与手机端都由页面自身滚动。
 - **神秘商人「没有记录」判定：是 BUG，不是没买过**。老版本有 `mystery-shop-history.js` + `/api/shop/mystery/history` + 页面「购买历史」区块（空态「暂无购买记录，手动和自动购买都会记录在这里。」）；新版移植商城时整条链路都漏了，无论是否购买都不会有记录。按老版口径补齐：
@@ -103,13 +407,13 @@ flowchart TB
 - 顺带用 ESLint 自动修复 `SolarCalendar.vue` 的 `defineEmits` 位置与 UnoCSS 类顺序，并清理 `worker.ts` 3 处既有 unused catch 绑定，使本轮改动文件 lint 全绿；均为等价改动。
 - 新增 `core/tests/mystery-shop-history.test.js` 4 项、`core/tests/mystery-shop-switches.test.js` 2 项、`web/tests/mystery-shop-history.test.mjs` 4 项。验证：core **367/367**、web **71/71**、`vue-tsc -b`、改动文件 ESLint、`vite build` 全部通过。仍无浏览器 / 真机截图，滚动与排版为静态断言 + 构建验证。
 
-### 2026-11-06 · 功能模块「土地与施肥」2x2催熟开关间距
+### 2026-11-06 · v3.5.12（#77） · 功能模块「土地与施肥」2x2催熟开关间距
 
 - **问题**：`AccountFeatureSettings.vue` 施肥参数 section 里 `2x2催熟` 与 `多季补肥` 两个 `BaseSwitch` 都是 `display:inline-flex`，直接相邻时只靠模板换行产生的一个空白字符分隔，文字「2x2催熟」后面紧跟着下一个开关的旋钮，看起来挤在一起。
 - **修复**：把两个开关包进 `flex flex-wrap items-center gap-x-6 gap-y-3` 容器，PC 端固定 24px 横向间距；窄屏放不下时自动换行并保持 12px 行间距。两个开关的 `v-model`、label、`mutationTestActive` 禁用逻辑，以及全站 `.base-switch` 自身的 8px 开关↔文字间距全部不变，其它模块的开关不受影响。
 - 新增 `web/tests/fertilizer-switch-spacing.test.mjs` 2 项静态断言（间距容器 / 绑定与全局样式不变）；已反向验证：撤掉容器时 2 项均 fail，恢复后全绿。验证：web **67/67**、core 361/361、`vue-tsc -b`、改动文件 ESLint、`vite build` 全部通过。仍无浏览器 / 真机截图，纯静态断言 + 构建验证。
 
-### 2026-11-06 · 同步上游 muyuewang/qq-farm-bot-404（ed75089..3b3608c，PR #119–#121）并保留本地改动
+### 2026-11-06 · v3.5.11（#76） · 同步上游 muyuewang/qq-farm-bot-404（ed75089..3b3608c，PR #119–#121）并保留本地改动
 
 - **同步基线**：`upstream/main` 从 `ed75089`（上次同步提交 `f1dc717`）前进到 `3b3608c`，共 8 个上游提交，净增量 6 个文件：`core/src/services/milk-tea.ts`、`web/src/components/activity/ShareRewardActivity.vue`、`web/src/layouts/DefaultLayout.vue`、`web/src/views/activity-center/MilkTeaContent.vue` / `MilkTeaPage.vue` / `MilkTeaWork.vue`。本地与上游历史不同源（本地 640 提交为重建历史，上游为浅克隆 59 提交），沿用仓库既有的「逐项采纳 + sync 提交」做法，不做 `git merge`，避免把 2350 个历史差异文件反向覆盖本地。
 - **采纳**：上游 PR #120「无员工时雇佣页面报错」的后端修复——`normalizeShop()` 增加 `result.slots ??= []`，proto 未返回 `slots` 时统一归一是空数组；新增 `core/tests/milk-tea.test.js` 回归用例（已验证：去掉该行时测试 fail 1，恢复后通过）。前端 `web/src/utils/milk-tea.ts` 的 `teaOpenSlots()` / `teaHireReason()` 原本就有 `(state.shop.slots || [])` 兜底，本地前端无需改动。
@@ -117,51 +421,51 @@ flowchart TB
 - 顺带把 `milk-tea.ts` 一处既有 ESLint 报错做等价替换（`[A-Za-z0-9_]` → `\w`），使改动文件 lint 全绿，不改变匹配行为。
 - 验证：core 361/361、web 65/65、`vue-tsc -b`、改动文件 ESLint、`vite build` 全部通过；本地未运行浏览器/真机，排版类改动本轮为零。
 
-### 2026-11-06 · 图鉴标题与收藏计数等高 + 奶茶两行左对齐
+### 2026-11-06 · v3.5.10（#75） · 图鉴标题与收藏计数等高 + 奶茶两行左对齐
 
 - **收藏图鉴**：`BookOverview.vue` 的 `.book-overview__heading` 从 `align-items: baseline` 改为 `center`，新增 `--book-heading-line: 20px` 以「已收藏 x / y」的行高作为整行高度基准；`h3`「作物图鉴」与 `.book-overview__caption` 共用同一 `line-height`，两块垂直居中对齐、看起来一样高。标题 15px、计数 12px 的字号与字体格式完全不变（用户明确要求不改字体）。该组件被作物 / 超变图鉴、藏品、快乐不独享共用，四处概览标题一并对齐。
 - **奶茶热销中**：`.tea-stock-basic` 去掉左右 10px 内距（`padding: 10px 10px 0` → `10px 0 0`），使「普通奶茶 · 不限量供应 · 3 券 / 杯」与无内距的 `.tea-actions` 里「账号设置 / 自动化状态」共用同一左边缘，以后者为基准。
 - 新增 `web/tests/overview-alignment.test.mjs` 2 项回归测试（等高对齐且字号不变 / 两行左边缘一致）。web 65/65、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
 
-### 2026-11-06 · 奶茶页返回按钮文案简化为「活动中心」
+### 2026-11-06 · v3.5.9（#73） · 奶茶页返回按钮文案简化为「活动中心」
 
 - 头部工具行首位 `.tea-link.tea-header-back` 按钮文案从「返回活动中心」改为「活动中心」四个字，箭头图标、透明文字样式、靠左位置与 `emit('back')` 行为不变；节令日历页 `SolarCalendar.vue` 的 `aria-label="返回活动中心"` 属于另一个组件，未改动。
 - `mobile-layout.test.mjs` / `settings-cleanup.test.mjs` 的文案计数断言同步：全页「活动中心」仍只出现 1 次、不再出现「返回活动中心」，并新增「箭头后直接跟四个字」断言。web 63/63、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
 
-### 2026-11-06 · 首页已运行手机端换行 + 去除奶茶侧栏「活动中心」/「快乐不独享」日期
+### 2026-11-06 · v3.5.8（#72） · 首页已运行手机端换行 + 去除奶茶侧栏「活动中心」/「快乐不独享」日期
 
 - **首页「在线 已运行 00:16:31 微信」**：PC 端保持原排布不变，仅手机端（≤639px）让「已运行 + 平台标签」整组落在在线图标的下一行。模板把两个 `ov-presence__item` 收进 `.ov-presence__meta`，基础样式 `inline-flex + nowrap` 保证组内不拆散；639px 媒体查询给该组 `flex: 0 0 100%` 独占第二行，并略缩到 11px 以容纳跨天时长。账号头结构、`v-if` 数据显隐、`localUptime` computed 与原有 `flex-wrap: wrap` 基础排布均未改动。
 - **奶茶活动页**：删除左侧栏 `tea-workspace-back`「活动中心」按钮（与头部「返回活动中心」重复），清理 850px 断点里对应的 CSS 死规则；头部「返回活动中心」按钮、侧栏 logo / 快捷入口 / 自动化状态保持不变，全页只留一个返回入口。
 - **功能模块自动化开关页**：删除「快乐不独享」右侧写死的活动日期徽标 `2026-09-24 00:00 — 2026-10-12 23:59`，标题、说明文案与三个开关（自动分享 / 每日快乐值 / 档位奖励）全部保留，标题区改回单列。
 - 新增 4 项回归测试（PC 基础不换行 / 手机端整组换行、侧栏按钮与 CSS 死规则清理且头部入口唯一、日期移除且字段齐全），新建 `web/tests/settings-cleanup.test.mjs`。web 63/63、core 360/360，`vue-tsc -b`、改动文件 eslint（0 error 0 warning）、`vite build` 全部通过。
 
-### 2026-11-06 · 土地等级二级弹窗缩小，与作物气泡同尺寸同风格
+### 2026-11-06 · v3.5.7（#71） · 土地等级二级弹窗缩小，与作物气泡同尺寸同风格
 
 - **问题**：从作物气泡点「土地等级 / 升级条件」打开的二级弹窗是 naive-ui `NModal + NCard`，`min(480px, 100vw-24px)` 宽、20px 圆角、大图 84×70、表格 9px 行距，和一级气泡（260px / 12px 圆角 / 12px 内距 / 10-12px 字号）差了一整档，手机端显得突兀。
 - **改法**：`LandDetailModal.vue` 弃用 `NModal/NCard`，改为 `Teleport to body` 的居中轻浮层 + 自绘卡片，尺寸与设计 token 逐项对齐一级气泡 —— 宽 `min(260px, calc(100vw - 32px))`（640px 以下 `100vw - 24px`）、`max-height: calc(100dvh - 24px)`、12px 内距 / 12px 圆角、`1px solid rgb(226 232 240)` 边框、`rgb(255 255 255 / .98)` 底、`0 14px 32px rgb(15 23 42 / .24)` 阴影；暗色边框/底色/文字同样一致。内部沿用 `bubble-cell`（8px 圆角浅灰卡）、`bubble-close`（20px）与 10-12px 字号。
 - **内容不变**：等级图片对比缩到 44×36，五行土地加成表压到 10-11px，条件与消耗物品用紧凑行展示；等级、加成、解锁/升级条件、消耗与余额判断、「当前已满级 / 部分条件暂未获取 / 当前可升级」提示全部保留，作物信息仍不出现。点击浮层外部与 ESC 均可关闭，父组件 `FarmPanel.vue` 的绑定零改动。
 - 新增 2 项回归测试：逐项比对两级弹窗的 9 条尺寸/风格声明与 3 条暗色声明，并锁住「不再使用 480px NCard / 土地信息字段齐全」。web 59/59、core 360/360，`vue-tsc -b`、改动文件 eslint（0 error 0 warning）、`vite build` 全部通过。
 
-### 2026-11-06 · 奶茶头部返回按钮合并 + 恢复「剩余时间」靠右对齐
+### 2026-11-06 · v3.5.6（#70） · 奶茶头部返回按钮合并 + 恢复「剩余时间」靠右对齐
 
 - **撤销上一轮「剩余时间靠右」的回滚**：按 `27b2d92` 原文恢复手机端工具区 `justify-content: flex-end`、剩余时间 `margin-left: auto` / `margin-right: 0`，639px 历史规则改回只压字号（去掉会把剩余推到最左的 `margin-right: auto`）。整段保持 `nowrap` + 等宽数字，剩余时间与「活动时间与规则 / 刷新」按钮靠右对齐成一排。
 - **去除头部白色方块返回按钮**：`tea-header-tools` 里只有箭头、底色发白的 `.tea-icon-button` 返回按钮删除；把原先只在「暂无活动数据 / 读取失败」空状态里出现的「⟵ 返回活动中心」文字按钮搬到工具行**首位**，改 `.tea-link + .tea-header-back`（透明背景、绿色文字、不折行，手机端缩到 10px），空状态原位置删除该按钮。头部始终渲染，因此全页只保留这一个「返回活动中心」入口，空状态仍留「重新读取」；侧栏「活动中心」链接与未开始/已结束页的「全部活动」按钮不变。
 - `mobile-layout.test.mjs` 头部测试改回靠右口径，并新增「白色图标按钮已移除 + 文字按钮位于工具行首位 + 空状态不再重复 + 新按钮透明不折行」回归。web 57/57、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
 
-### 2026-11-06 · 首页状态行再退一格 + 回滚「剩余时间」靠右对齐
+### 2026-11-06 · v3.5.5（#69） · 首页状态行再退一格 + 回滚「剩余时间」靠右对齐
 
 - **首页「在线 已运行 00:16:31 微信」再退一格**：按反馈退到 `f5c7d25` 跳位修复之前（`240e41a`）的原始排布 —— `.ov-presence` 恢复 `flex-wrap: wrap`，移除 `min-width: 0` / `overflow: hidden` 裁剪兜底；模板恢复 `v-if="isOnline"` 控制「已运行」整段显隐，去掉离线占位、`7ch` 等宽数字与平台标签固定列（`ov-presence__uptime` / `__digit` / `__platform` 相关样式一并删除）。**保留** `localUptime` computed 单调递增、服务端锚点与重启重新锚定、平台标签 ref 缓存这三处数据正确性修复 —— 它们不影响排布，回退会重新引入「数字忽进忽退」。
 - **「剩余 10 天 9 小时」靠右与按钮对齐回滚**：撤销 `27b2d92` 的靠右方案，恢复 `1980ffb` 的排布 —— 工具区 `justify-content: flex-start`、剩余 `margin-right: auto`，639px 历史规则同步恢复 `margin-right: auto`。领取收益「PC / 手机端同排」的改动保持不变。
 - 更新 `dashboard-presence.test.mjs`（前 3 项改为回退口径）与 `mobile-layout.test.mjs`（首页测试改「再退一格」、头部测试改「靠右已回滚」）。web 56/56、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
 
-### 2026-11-06 · 手机端排版再调整：首页恢复原方案 + 领取收益 PC/手机同排
+### 2026-11-06 · v3.5.3（#68） · 手机端排版再调整：首页恢复原方案 + 领取收益 PC/手机同排
 
 - **首页「在线 已运行 00:16:31 微信」恢复原方案**：按反馈回退上一条记录（`1980ffb`）里的固定三列栅格与手机端账号头两行方案 —— `.ov-presence` 回到单行 flex `nowrap` + `overflow: hidden` 兜底、时长数字回到 `7ch` 等宽、平台标签恢复 `v-if="platformLabel"`，账号头恢复 `min-w-0 flex-1` 的原始单行结构。手机端不再为了固定位置多占一行。
 - **领取收益模块 PC 与手机端排布不一致**：根因是同一张卡片写了两套布局 —— 基础 `.tea-claim` 是 `flex-wrap: wrap` 且 `<p>` 为块级（文案与数值天生两行），手机端却另写一套 grid；额外奖励里 `.tea-reward-name` 又是 `display: block`，把「金币」名称和数量拆成上下两排。修复：把 `grid-template-columns: auto minmax(0, 1fr) auto` 提到基础规则，图标 / 文案+数值+单位 / 领取按钮固定同排，`.tea-claim__extras` 固定第二行，`.tea-claim__value` 一律 `flex-wrap: nowrap` + `white-space: nowrap` + 数值 `overflow-wrap: normal`；额外奖励名称改 `inline` 与数量同排。手机端只保留字号、内距、图标尺寸覆盖，**不再重写 display / grid 列结构**，因此 PC 与手机端完全同一排。
 - **「剩余 10 天 9 小时」靠右与「活动时间与规则」按钮对齐**：手机端 639px 历史规则 `.tea-header-tools > span { margin-right: auto }` 把剩余时间顶到最左、按钮留在最右，两者虽然同行却分离。改成只压字号（不设 auto 外边距），统一排版块里工具区 `justify-content: flex-end` + 剩余 `margin-left: auto` / `margin-right: 0`，让剩余时间与规则、刷新按钮一起靠右对齐成一排，整段 `nowrap` + 等宽数字不换行。PC 端工具区本就是靠右一排，未改动。
 - 更新 `mobile-layout.test.mjs`：撤回上一轮 3 项首页栅格断言，新增「首页恢复原方案」回归；奶茶两条断言改为校验「基础规则统一 + 手机端只缩尺寸」与「剩余靠右」。web 57/57、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
 
-### 2026-11-06 · 手机端固定排版：首页已运行状态行 + 奶茶活动三处对齐
+### 2026-11-06 · v3.5.2（#67） · 手机端固定排版：首页已运行状态行 + 奶茶活动三处对齐
 
 - **「已运行 03:34:40 微信」位置仍不固定**：上一版只做了「禁止换行 + 等宽数字」，但手机端账号头是「头像 + 名字/状态 + 我的农场按钮」的单行 flex，状态行只剩约 170px，被 `overflow: hidden` 裁掉，平台标签又用 `v-if` 抽掉整段导致出现/消失时重排。修复：`.ov-presence` 改成固定三列栅格（`56px / 152px / 36px`，宽度写死、与容器宽度无关），平台标签与离线状态一样常驻占位（`visibility: hidden`），时长数字 `8ch` 等宽且不折行、跨天的「1天 03:34:40」也能完整显示；手机端 `.ov-account__head` 改两行栅格，中间容器 `display: contents` 让名字留在第一行、状态行 `grid-column: 1 / -1` 独占第二行并横跨整张卡片，不再与按钮抢宽度。
 - **奶茶活动头部「图标 / 奶茶热销中 / 进行中」不对齐**：根因是工具区（返回、剩余时间、规则、刷新）与标题区挤在同一个 flex 行，手机端标题区只剩约 98px，徽章被折到第二行、标题本身也会断行。修复：图标移进 `.tea-title-line`，与 `h2`、状态徽章成为同一 `nowrap` 行的三个元素；手机端头部拆两行，标题区 `flex: 1 1 100%` 占第一行、工具区同样占满第二行并 `flex-wrap: nowrap`。
@@ -169,27 +473,27 @@ flowchart TB
 - **「待领取收益 198 奶茶券」显示不统一**：`.tea-claim` 基础是 `flex-wrap: wrap`，且 `<p>` 是块级元素使文案与数值天然分两行，`.tea-number` 的 `overflow-wrap: anywhere` 还会把数字拆断。修复：文案 / 数值 / 单位收进 `.tea-claim__value`，「收银台已满」与额外奖励移到 `.tea-claim__extras`；手机端 `.tea-claim` 用固定三列栅格（图标 / 数值行 / 领取按钮），数值行 `flex-wrap: nowrap` + `white-space: nowrap` + `overflow-wrap: normal`，额外奖励固定落到第二行，不挤压数值行。
 - 新增 6 项手机排版回归测试、更新 1 项状态行断言。web 59/59（+6）、core 360/360，`vue-tsc -b`、改动文件 eslint、`vite build` 全部通过。
 
-### 2026-11-06 · 土地气泡收益跟随变异叠加 + 奶茶活动 4 个新开关
+### 2026-11-06 · v3.5.1（#66） · 土地气泡收益跟随变异叠加 + 奶茶活动 4 个新开关
 
 - **作物气泡里「每季经验 / 每季金币」是固定值**：根因在 `core/src/services/farm/land-analysis.ts` 的 `buildLandDetail()` —— 只按 `plant.exp` 和「果实单价 × 数量」算基础收益，完全没读变异效果。修复：解析官方 `MutantEffect.actions`（`2:x` 果实数量倍率、`3:x` 售价倍率、`4:0` 变身），数量倍率同时放大经验与金币、售价倍率只放大金币，同类倍率相乘形成叠加；后端直接输出叠加后的 `harvestExpPerSeason` / `harvestGoldPerSeason`，并附带 `harvestBonus`（基础值、两个倍率、逐条变异明细）。`LandCropBubble.vue` 据此展示 `×N` 徽标、「基础 xxx」和琥珀色变异来源说明，不在前端重复解析配置。变身果实（黄金 / 奶茶等）用金豆豆或活动币计价，只标注不折算进金币，避免把 `1005` / `1017` 的数量误显示成金币金额；空地与未解锁土地两项收益归零。
 - **「土地等级 / 升级条件」弹窗不再重复作物信息**：气泡里点进去的 `LandDetailModal.vue` 裁掉整个作物区（作物名、状态、成熟倒计时、生长季数、每季收益、阶段进度、变异效果、缺水草虫、催熟 / 铲除），只保留土地等级图片、五项加成表、解锁 / 升级条件、消耗物品与余额判断；`emits` 收窄为仅 `close`，催熟 / 铲除仍留在 `LandCropBubble`，`FarmPanel.vue` 去掉两个多余绑定。
 - **奶茶活动新增 4 个自动化开关（均在「功能模块 → 日常与活动 → 奶茶活动」）**：`同时购买金币果种子`、`同时购买经验蘑菇种子` 仅在「自动购买已解锁种子」开启时生效、默认不买 —— 它们是购种范围过滤，主开关关闭时 UI 禁用、后端也不会兑换这两类种子；`自动购买普通化肥`、`自动购买有机肥料` 是互不影响的独立调度动作，不受购种开关影响，按官方物品 ID（`80001~80004` / `100003` 普通，`80011~80014` / `100004` 有机，名称兜底）结合限购余量与各货币余额自动兑换。四处同步：`MILK_TEA_AUTOMATION_OPTIONS` 选项表、`DEFAULT_ACCOUNT_CONFIG.automation` 白名单与类型、`buildOps()` 执行器、`MilkTeaActivityPanel.vue` 表单；首页自动检查计数只加入两个化肥动作，附加种子开关不算独立待执行项；「推荐全自动」同样保持两个附加种子开关不勾选。
 - 新增 21 项回归测试（core 14 项：变异倍率叠加 7 项、购种范围 / 化肥识别 / 开关注册 7 项；web 7 项：开关注册与分类 5 项、气泡收益与弹窗裁剪 2 项）。core 360/360、web 53/53，双端类型检查、eslint、vite build 全部通过。
 
-### 2026-11-06 · 首页「已运行」不再跳位 + 重新登录后自动上线
+### 2026-11-06 · v3.5.0（#65） · 首页「已运行」不再跳位 + 重新登录后自动上线
 
 - **首页「已运行 / 微信 · QQ」偶尔跳来跳去**：两个原因叠加。① `.ov-presence` 用了 `flex-wrap: wrap`，时长从 `59:59` 进位到 `01:00:00`、或平台标签出现/消失时整行宽度越过阈值就掉到第二行，卡片高度随之变化；② 时长是两个来源互相覆盖 —— 每秒 `localUptime++`，每 10s 又被整包 `status.uptime` 冲回原值，数字忽进忽退。修复：状态行改单行不换行、时长数字等宽固定最小宽度、`v-if="isOnline"` 改为占位隐藏（离线不再抽掉整段把后面元素顶到左边）、平台标签改 `ref` 缓存（账号列表刷新失败的瞬间不闪掉）；时长改 `computed`，以服务端值为锚点 + 本地时间差推进，单调递增；保留「大幅回退视为账号重启、重新锚定」分支，避免重启后一直卡着旧数字。
 - **账号管理页重新扫码 / 填完新 Code 后不会直接登录**：上一版为了让编辑态重扫把新凭据写回原账号，前端开始带 `id` 提交。带 `id` 后不再走「备注名碰巧匹配」那条 relogin 分支，掉进 `wasRunning && !onlyRemarkChanged`——账号本来是停止状态时 `wasRunning` 为 `false`，结果既不 `restart` 也不 `start`。修复：把「带 id 且携带新登录凭据（code / refreshtoken / loginBuffer）」也认定为重新登录；在跑的重建 worker，已停止的直接启动（启动前会先换码）。新增/纯备注两类行为不变。
 - 新增 13 项回归测试（core 7 项：仅改备注不启停、带 id 重登已停止要启动、带 id 重登在运行要重启、非登录字段更新不误拉起、备注重登、新增账号自动启动；web 6 项：状态行 nowrap、离线占位、等宽数字、时长单调、重启归零可重锚、平台标签缓存）。core 346/346、web 46/46，双端类型检查、eslint、vite build 全部通过。
 
-### 2026-11-06 · 微信授权续期稳定性 + 土地详情恢复老版作物气泡
+### 2026-11-06 · v3.3.18（#63） · 微信授权续期稳定性 + 土地详情恢复老版作物气泡
 
 - **「账号授权续期」会失败**：`refreshtoken` 是滚动凭证，手动按钮、定时重登、掉线重登、启动前换码四个入口并发时共用同一个旧 token，第二个必然被服务端拒绝；且旧值已作废却没落盘新值，导致之后续期持续失败。换 Code 失败时同样丢掉了刚滚动出来的新 token。修复：按账号串行锁（所有入口共用）、失败也落盘新 token / loginBuffer、批量续期改为优先用长效 `loginBuffer` 换 Code（老版 `ensureFreshGameCode` 策略）、只有 `loginBuffer` 而没有 `refreshtoken` 的账号也纳入可续期范围。
 - **重新扫码后访问凭证仍显示「待续期」颜色**：历史 `wxCredentialRefreshError` 从未清空（前端 payload 没带、后端只合并传入字段），颜色判定又只看错误字符串不看时间。修复：账号 Code / 长效凭据变化时后端自动清失败标记并刷新时间戳；扫码登录始终保存整套续期凭据（不再以 `refreshtoken` 为门槛）、编辑态重扫直接按 id 更新原账号；前端状态判定抽成 `getCredentialStatus`（秒/毫秒时间戳归一化、最近成功时间 + TTL 兜底、仅当最近失败晚于最近成功才标黄）。
 - **土地详情点开作物恢复老版就地气泡**：新增 `LandCropBubble.vue`（Teleport 到 body 的浮动气泡，含土地编号、状态徽章、成熟倒计时、生长季数、每季收益、阶段进度、变异效果与描述、缺水草虫标签、催熟/铲除），点击卡片或场景地块就地浮出，不再弹居中大弹窗；土地等级与升级条件改由气泡内「土地等级 / 升级条件」入口打开原 `LandDetailModal`。定位算法抽成 `computeBubblePosition`（默认贴上方、空间不足翻下方、视口钳制、小箭头跟随地块中心）。
 - 新增 29 项回归测试（core 11 项：账号凭据状态、串行锁、滚动 token 落盘；web 18 项：凭证状态、气泡定位、接线）。core 339/339、web 40/40，双端类型检查、eslint、vite build 全部通过。
 
-### 2026-11-06 · 任意页面切换账号后保持原页面与原滚动位置
+### 2026-11-06 · v3.3.17（#62） · 任意页面切换账号后保持原页面与原滚动位置
 
 - 手机端在页面中下部切号会跳回顶部，根因是切号时 `status.value = null`、活动中心 `snapshot` 被重置，页面主体内容瞬间卸载使 `#farm-page-content` 高度塌陷，浏览器把 `scrollTop` 钳制为 0，数据回填后不会自动还原。
 - 新增 `web/src/composables/useAccountSwitchScroll.ts`：切号前快照主滚动容器及所有嵌套滚动容器的 `scrollTop`/`scrollLeft`（含横向页签栏）；切号后通过 `nextTick` + rAF + `MutationObserver` + 多轮定时持续还原，覆盖 3 秒保护窗口；用户一旦触摸/滚轮/按键即交还控制权；切号伴随正常路由跳转则不干预。
@@ -197,7 +501,7 @@ flowchart TB
 - 修复活动中心残留的跳页问题：`activity-center` 的 `performLoad` 切号时清空快照会让 `stellarDetailsAvailable` 变 false，原 watch 会把星砂活动页踢回活动目录。现改为切号窗口内延后复核，数据确实仍不可用才回退；其余活动页沿用既有保持逻辑。
 - core 328 项 / web 22 项测试通过，eslint 与 vue-tsc 类型检查通过。
 
-### 2026-11-06 · 修复背包种子页仍每 10 秒自动刷新
+### 2026-11-06 · v3.3.16（#61） · 修复背包种子页仍每 10 秒自动刷新
 
 - 根因：页面级常驻组件 `PersonalResourceStrip.vue` 有独立的 10 秒兜底轮询，`refresh()` → `bagStore.fetchBag()`（2.5s 节流，10s 周期必触发），每次整体替换 `allItems` 导致背包种子列表重渲染；它位于三个页签之外、且不受自动刷新开关控制，是上次只改 BagPanel 定时器时漏掉的入口。
 - 修复：10 秒轮询只保留 status 兜底与图鉴/钻石 60s 节流，不再拉背包；背包周期刷新统一由页面级 `useFarmAutoRefreshInterval` 按共享开关与用户设定秒数驱动（默认关闭）。
@@ -206,14 +510,14 @@ flowchart TB
 - 加固 `useFarmAutoRefresh`：偏好监听移入 `effectScope(true)` 独立作用域，组件卸载/路由切换后 watch 仍有效，避免切账号时开关状态串号、开关变化不再写回 localStorage。
 - core 328 项 / web 22 项测试通过，vue-tsc 类型检查通过。
 
-### 2026-11-05 · 同步上游 20261104 更新（PR #117-#118 至 ed75089）
+### 2026-11-05 · v3.3.15（#60） · 同步上游 20261104 更新（PR #117-#118 至 ed75089）
 
 - 采纳上游 muyuewang/qq-farm-bot-404 `b804745..ed75089` 增量（7 个提交）：购买数量上限同时受限购与余额约束（新增 `web/src/utils/purchase-count.ts` 与测试）、快乐不独享双端版本同步并完善奖励描述（`share-reward-activity` reward 补 description、`ShareRewardActivity.vue` 布局重排）、TSDK 升级 `v3.9.0.1793764291`/微信 `1793763796`（双 wasm + tsdk-runtime 钉值）、客户端版本 `1.16.3.8_20261028`（config + 三处测试钉值）、游戏配置 JSON 刷新。
 - 上游对 `MilkTeaContent.vue` 的兑换上限改进不移植：本地老版回归面板已由后端 `maximumPurchase`（限购+余额取最小，BigInt）+ 前端 `teaPurchaseMax` 覆盖同语义，该文件本地已删除。
 - 冲突处理：4 个本地定制文件（config.ts 自动重登配置、share-reward-activity 活动轮次缓存、两个 keepalive 测试的静默熔断用例）逐行手工合并，本地功能全部保留。
 - core 328 项 / web 22 项（含新增 purchase-count 3 项）测试通过，类型检查通过。
 
-### 2026-11-05 · 今日统计卡片样式统一 + 增量逻辑分离 + 农场页整体刷新治理
+### 2026-11-05 · v3.3.13（#59） · 今日统计卡片样式统一 + 增量逻辑分离 + 农场页整体刷新治理
 
 - 首页今日统计「金币/经验」两卡改为「图标 + 数值」：去掉「今日金币/今日经验」文字与数值前的 `+`，金币改用项目金币图标（`/game-config/resource-icons/gold.png`），卡片尺寸/背景与下方其他统计卡统一（`bg-gray-50` 同款）。
 - 增量逻辑分离：core stats 新增「本次运行基线」（登录时记录、不做持久化恢复）与 `runGoldGained/runExpGained/runCouponGained`；首页资产卡片「本次 +N」与个人页「本次运行金币/点券」改用运行增量（重启即归零重算，恢复旧行为）；今日统计两卡继续用当日增量（跨重启按天累计）。两套逻辑互不影响。
@@ -221,7 +525,7 @@ flowchart TB
 - 自动刷新逻辑覆盖整个我的农场页：新增共享 `useFarmAutoRefresh` 组合式（开关+秒数按账号存 localStorage，三个面板共用一份状态）；背包移除固定 60 秒轮询、任务页新增周期刷新，土地/背包/任务统一默认不刷新、由同一开关控制。
 - core 328 项 / web 19 项测试通过，类型检查通过。
 
-### 2026-11-05 · 今日统计加金币/经验增量 + 背包排序 + 农场自动刷新开关 + 移动端导航调整
+### 2026-11-05 · v3.3.12（#58） · 今日统计加金币/经验增量 + 背包排序 + 农场自动刷新开关 + 移动端导航调整
 
 - 首页今日统计新增「今日金币」「今日经验」两卡：后端 stats 以当日首次基线计算增量（`initialState` 按天持久化，同日重启恢复基线继续累计，跨天自动重新起算；重新登录仍按原语义重置会话）。
 - 我的背包分类按钮排序调整为：果实 → 超变果实 → 种子 → 道具 → 全部。
@@ -229,54 +533,54 @@ flowchart TB
 - 手机端底部导航：移除「宠物」，新增「图鉴」（收藏图鉴）入口；宠物小屋仍保留在桌面侧栏。
 - core 328 项 / web 19 项测试通过，类型检查与构建通过。
 
-### 2026-11-05 · 切换账号后保持在所有活动页面
+### 2026-11-05 · v3.3.11（#57） · 切换账号后保持在所有活动页面
 
 - `ActivityCenter.vue` 账号切换监听不再重置到活动目录：保持当前活动页，并抽出 `loadActivitySideData` 为需要按账号取数的活动（七乡/青梅/公益/天气/星宿）重拉 `loadDetails` 与好友数据；奶茶/秋祈/快乐不独享/宠物日记/节气自带的账号监听自行刷新。星宿页数据不可用时仍由原有监听回退到目录。vue-tsc 与 19 项 web 测试通过。
 
-### 2026-11-05 · 切换账号后保持在奶茶热销中页面
+### 2026-11-05 · v3.3.10（#56） · 切换账号后保持在奶茶热销中页面
 
 - `ActivityCenter.vue` 账号切换监听不再无脑重置到活动目录：当前在奶茶页（milk）时切号保持不动，由奶茶面板自带的账号监听清空旧状态并以新账号重新拉取；其它活动页仍回到活动目录。vue-tsc 与 19 项 web 测试通过。
 
-### 2026-11-05 · 活动中心默认进入奶茶热销中
+### 2026-11-05 · v3.3.9（#55） · 活动中心默认进入奶茶热销中
 
 - `ActivityCenter.vue` 挂载时默认选中 `milk`，进入活动中心直接打开奶茶热销中页面；点返回仍回到活动目录可选其它活动，切换账号行为不变（回到目录）。vue-tsc 与 19 项 web 测试通过。
 
-### 2026-11-05 · 营业记录数据链路对齐老版（补回 normalizeWireMaps）
+### 2026-11-05 · v3.3.8（#53） · 营业记录数据链路对齐老版（补回 normalizeWireMaps）
 
 - 移植缺口：老版 `rpc()` 对所有应答统一 `normalizeWireMaps(plain(...))`，现版定义了该函数却没有调用点。protobufjs `map<int64,…>` 字段（营业记录 `cups_by_recipe` 等）的 hash 键未还原成十进制字符串，导致配方查找失败、名称为空、图标破图，营业记录数据残缺。
 - 修复：`milkTeaRecords/op`、`shareOp`、`opWith` 三条应答路径统一补回 `normalizeWireMaps(plain(...))` 包装，与老版行为一致；营业记录（含雇员记录、收益、各款售出）数据链路完整对齐老版。
 - 核对结论：前端营业记录四块结构（日期+总杯数、奶茶销售表、营业收益、雇员记录）与老版生产组件逐行一致，仅图标渲染为此前修复的增强；后端 records 组装逻辑与老版逐行相同。后端 328 项测试通过，类型检查通过。
 
-### 2026-11-05 · 再次恢复 milk_tea_work_interaction_type / milk_tea_hire_policy 接线
+### 2026-11-05 · v3.3.7（#52） · 再次恢复 milk_tea_work_interaction_type / milk_tea_hire_policy 接线
 
 - 撤销 `bda84a6`，恢复 `8c8385d` 的接线方案：`milk_tea_interact` op 以 `milk_tea_work_interaction_type` 覆盖打工互动类型（未设置回退 `milk_tea_interaction_type`）；`milk_tea_hire` op 以 `milk_tea_hire_policy.talent`（0/9001~9004）覆盖首选人才（未设置回退 `milk_tea_hire_primary_talent ?? milk_tea_hire_talent`）。
 - `milk_tea_seed_policy` 保持回滚状态。后端 328 项测试通过，类型检查通过。
 
-### 2026-11-05 · 再次撤销 milk_tea_work_interaction_type / milk_tea_hire_policy 接线
+### 2026-11-05 · v3.3.6（#51） · 再次撤销 milk_tea_work_interaction_type / milk_tea_hire_policy 接线
 
 - 撤销 `8c8385d` 恢复的两项接线：`milk_tea_interact` op 恢复仅读 `milk_tea_interaction_type`；`milk_tea_hire` op 恢复仅读 `milk_tea_hire_primary_talent ?? milk_tea_hire_talent`。
 - 两个开关回到僵尸键状态（字段定义保留，UI 可见可存但配置不生效）；`milk_tea_seed_policy` 同样保持回滚状态。后端 328 项测试通过，类型检查通过。
 
-### 2026-11-05 · 恢复 milk_tea_work_interaction_type / milk_tea_hire_policy 两项接线
+### 2026-11-05 · v3.3.5（#50） · 恢复 milk_tea_work_interaction_type / milk_tea_hire_policy 两项接线
 
 - `milk_tea_interact` op：恢复以 `milk_tea_work_interaction_type` 作为打工互动类型的覆盖项，未设置时回退旧字段 `milk_tea_interaction_type`。
 - `milk_tea_hire` op：恢复 `milk_tea_hire_policy.talent`（0/9001~9004）对首选人才的覆盖，未设置时回退 `milk_tea_hire_primary_talent ?? milk_tea_hire_talent`。
 - 实现取自提交 `90ae270`（此前回滚 `17b1416` 的原方案）；`milk_tea_seed_policy` 保持回滚状态不变。后端 328 项测试通过，类型检查通过。
 
-### 2026-11-05 · 页面闪烁治理 + 策略预览秒开 + 背包默认页签
+### 2026-11-05 · v3.3.3（#39） · 页面闪烁治理 + 策略预览秒开 + 背包默认页签
 
 - 页面闪烁（全页面间歇性「像在不停刷新」）：三类全局空更新导致整树周期性重渲染——① worker 每 10s 全量推送 status，前端即使内容未变也整体替换 `status` 对象（现做 JSON 级比对，未变化直接跳过）；② Sidebar 每 30s `checkConnection` 会对同一账号重复 `subscribe`，服务端每次都全量重推 status + 日志快照（现记录已订阅房间，同账号不重复订阅，断线重连时才重推）；③ 账号列表 10s 轮询每轮都替换数组（现做字段级比对，内容未变不替换）。改动集中在 `stores/status.ts`、`stores/account.ts`。
 - 种植与收获「第二优先策略预览」每次打开都先显示加载中：弹窗每次打开都会重建组件，种子目录/背包种子/分析排行全部从零请求，且种子目录请求要等下一次 status 推送（最长 10s）才触发。按老版共享缓存方案改造 `usePlantingStrategy`：模块级按账号缓存种子目录与背包种子（重开秒显、后台静默刷新）、分析排行加 60s TTL 缓存（预览不再等一次 /api/analytics 往返）、status 监听加 `immediate` 首次立即拉取；背包种子列表在有缓存数据时不再整体切回「加载中」。
 - 我的背包默认页签从「果实」改为「种子」。
 - 前端 `vue-tsc -b` 退出码 0，19 项测试通过。
 
-### 2026-11-05 · 营业记录图标补全 + 图鉴搜索框位置调整
+### 2026-11-05 · v3.3.2（#38） · 营业记录图标补全 + 图鉴搜索框位置调整
 
 - 奶茶热销中「营业记录」：奶茶名称前的图标此前永远不显示——配方配置表没有 `image` 字段，后端下发的 `drinks[].image` 恒为空字符串，前端 `v-if="drink.image"` 恒假。现按老版经营台方案改按配方 ID 渲染 `icon_s4_milktea_<配方ID>`（素材 `web/public/activity/milk-tea/icon_s4_milktea_1..9.png` 已齐全，走 `teaImage()` 解析），并对未收录配方补名称兜底「奶茶 #ID」；图标样式沿用 `.tea-product > img` 的 51×54 描边底座。
 - 收藏图鉴（BookToolbar，作物/超变/藏品/变异宝典共用）：筛选条搜索框原先被 `flex:1` 的筛选按钮行推到页面最右侧，宽屏下离筛选区过远。改为筛选按钮行不再伸展（`flex: 0 1 auto`），搜索框紧跟筛选按钮之后；移动端折行行为不变。
 - 前端 `vue-tsc -b` 退出码 0，19 项测试通过。
 
-### 2026-11-05 · 四页控件显示效果统一（对齐全站 BaseButton 规范）
+### 2026-11-05 · v3.3.1（#37） · 四页控件显示效果统一（对齐全站 BaseButton 规范）
 
 - 账号设置页：「7 / 7 项开启」计数徽标改为与全站 secondary 按钮一致的主色柔底胶囊（`--ui-primary-soft` 底 + `--ui-primary` 字 + 标准按钮字体处理 `fw-500`/`0.02em` 字距），不再是白底描边孤立样式。
 - 好友农场页：工具条搜索框旁的「刷新好友列表」按钮从裸 `NButton secondary` 改为标准 `BaseButton variant=secondary`（统一 `.base-button` 字体处理），与同页 GID 卡片按钮一致。
@@ -284,7 +588,7 @@ flowchart TB
 - 收藏图鉴：「一键购买未解锁」由 `primary ghost` 描边改为标准实底 `BaseButton variant=primary`，同排「奖励详情」「领取奖励」一并改用 `BaseButton`（secondary/primary），整排与全站按钮一致。
 - 前端 `vue-tsc -b` 退出码 0，19 项测试通过。
 
-### 2026-11-05 · 15 项功能开关失效修复（老版方案移植）
+### 2026-11-05 · v3.3.0（#36） · 15 项功能开关失效修复（老版方案移植）
 
 - 审计 `AutomationConfig` 全部开关，发现 15 个「开关打开却无任何效果」的功能缺口，已全部修复（参考老版 `golden-bug-service.js` / `mall-gift-auto-buy.js` / `farming-orchestrator.js` / `worker.js` 口径）：
   - **`task_after_farm`**（带 UI）：把「日常任务领取」绑定到农场循环之后立即跑一轮，不必等独立任务定时器；与 `task` 互不冲突（领取幂等）。
@@ -295,7 +599,7 @@ flowchart TB
 - 类型与默认值同步清理：`core/src/types/config.ts`、`core/src/models/store/shared-state.ts`、`web/src/stores/setting.ts` 删除孤儿字段；`activity-automation.ts` 的 `unsupported` 待接入清单移除已接线的 `wish_sign_draw` / `wish_sign_claim`。
 - 新增 8 项针对性回归测试（自家黄金虫地块识别、好友可放黄金虫判定、点券礼包可买数、黄金虫计数、种子优先级覆盖）；后端 329 项、前端 19 项全部通过，类型检查与生产构建通过。
 
-### 2026-11-05 · 回滚 3 项开关接线（milk_tea_work_interaction_type / milk_tea_seed_policy / milk_tea_hire_policy）
+### 2026-11-05 · v3.2.12（#35） · 回滚 3 项开关接线（milk_tea_work_interaction_type / milk_tea_seed_policy / milk_tea_hire_policy）
 
 - 应需求将上面「15 项修复」中的以下 3 个开关回滚到修复前的无效状态（仅撤销消费逻辑，字段定义与默认值保留，对前端与用户已存配置无影响）：
   - `milk_tea_work_interaction_type`：`milk_tea_interact` op 不再用其覆盖打工互动类型，恢复仅读 `milk_tea_interaction_type`。
@@ -303,7 +607,7 @@ flowchart TB
   - `milk_tea_hire_policy`：`milk_tea_hire` op 不再用其 `talent` 覆盖首选人才，恢复仅读 `milk_tea_hire_primary_talent ?? milk_tea_hire_talent`。
 - 移除上述策略覆盖对应的回归测试（种子优先级覆盖两项），保留 `pickSeedGoods` 默认排序的基础用例；后端测试由 329 降为 328 项，全部通过，类型检查与生产构建通过。
 
-### 2026-11-05 · 2×2 催熟功能修复与背包多格种子角标
+### 2026-11-05 · v3.2.11（#33） · 2×2 催熟功能修复与背包多格种子角标
 
 - 修复「设置 → 2x2 催熟」开关不生效：该开关此前在 core 中没有任何消费点（只有默认值和类型定义），属于历史恢复 UI 时遗留的功能缺口。现按老版 `farm-fertilizer.js` 口径完整移植：
   - `runFertilizerByConfig` 新增 2×2 催熟分支：识别 2×2 作物主地块（从属地块与主地块一起从常规施肥目标中剔除，避免普通肥只落在合种作物的其中一个地块上），对生长中的 2×2 作物先施一次普通肥，再逐块循环施有机肥直至成熟。
@@ -313,7 +617,7 @@ flowchart TB
 - 背包中多格种子新增左上角「2×2」角标（与锁标同位置体系，同时存在时锁标自动让位），后端背包物品新增 `plantSize` 字段。
 - 新增 7 项回归测试（2×2 主地块识别、催熟循环的成熟停止/无推进停止/肥料耗尽/失败停止/非催熟模式语义保持）；后端 321 项、前端 19 项全部通过，类型检查与生产构建通过。
 
-### 2026-11-05 · 服务启动自动登录与登录 Code 续期修复
+### 2026-11-05 · v3.2.10（#32） · 服务启动自动登录与登录 Code 续期修复
 
 - 「探索与成长 → 活动中心」页头「刷新」及空状态的「重新加载 / 刷新活动」统一改为绿色实底白字主按钮（与其它页面一致的 `BaseButton variant="primary"`）；同时把父页面里一条非 scoped 的 `.picker-state button` 全局样式限定为只作用于原生按钮，避免主按钮被覆盖成白底绿字。
 - 新增「服务启动自动登录」：系统设置 → 账号保活卡片可开关（默认开启），也可用环境变量 `FARM_AUTO_START_ACCOUNTS=0` 覆盖。服务重启后逐账号错峰拉起（间隔 1.5 秒），单个账号失败不影响其它账号。
@@ -323,14 +627,14 @@ flowchart TB
 - 修复 `store.json` 加载时丢弃 `autoCodeRefresh` 字段的问题：账号保活配置不再因服务重启而回到默认关闭。
 - 新增 9 项回归测试（自动登录开关解析、loginBuffer-only 换码、QQ 重签成功/回退/不支持去重、启动链路防回归）；后端 314 项、前端 19 项全部通过，类型检查与生产构建通过。
 
-### 2026-11-05 · 回滚硬预算期的省请求改动 + 修复奶茶手动兑换
+### 2026-11-05 · v3.2.9（#31） · 回滚硬预算期的省请求改动 + 修复奶茶手动兑换
 
 - 回滚 60s 硬预算时代为省请求而牺牲实时性的改动：地块 1.2s TTL 快照、施肥复用巡田快照、任务扫描 30s 节流、化肥礼包 60s 冷却、巡田按预算推迟、偷菜前 60s 抢收窗口、活动自动化首轮额度顺延，全部恢复为「每次读实时数据 / 按正常节奏执行」。
 - 修复奶茶热销中「兑换商店」手动购买失败：老版页面快照把 protobuf int64 原样下发，`goods.id` 经 worker IPC / `res.json` 变成 `{low,high,unsigned}`，前端回传后匹配不到任何商品。现在按老版 `normalizeGoods` 口径把商品字段统一成字符串/数字，`purchase_limit=0` 正确识别为不限购（`remaining=null`），购买时也兼容历史 Long 形态的 goodsId。
 - 账号设置总览右上角「x / x 项开启」改为实底描边徽标，不再用主题绿字直接压在页面背景上，浅色渐变与背景图区域也能清晰辨认。
 - 新增 3 项奶茶老版快照契约测试（DTO JSON 安全、购买编号归一、精确报错不写请求）与 3 项前端兑换上限测试（有限限购/不限购/钻石与结算期拦截），后端 305 项、前端 19 项全部通过。
 
-### 2026-11-05 · 网关流量机制重构：前台操作不再被限额
+### 2026-11-05 · v3.2.8（#30） · 网关流量机制重构：前台操作不再被限额
 
 - 移除「60s 内 80 个请求」的全局硬预算。旧方案连用户在面板上的操作一起拦，日志里 `AllLands` 一天被拒 934 次、`TaskInfo` 162 次、`GetGroup`/`Bag` 各 74 次，表现为「我的农场打不开 / 点了没反应」。
 - 新的流量整形只约束自动任务（农场 / 好友 / 补数据）：前台请求与心跳、登录、ACE 上报、收菜偷菜**永不因配额被拒**，前台请求也不消耗额度。
@@ -340,7 +644,7 @@ flowchart TB
 - 前端 axios 超时从 10s 放宽到 15s，适配「我的农场」这类要串多个网关请求的接口。
 - `docs/network-concurrency.md` 补充流量保险丝分档、环境变量与心跳补发说明；新增 8 项流量整形契约测试，后端 302 项、前端 16 项全部通过，类型检查与生产构建通过。
 
-### 2026-11-05 · 手机端账号入口与操作按钮统一
+### 2026-11-05 · v3.2.7（#29） · 手机端账号入口与操作按钮统一
 
 - 手机端右上角账号切换按钮重新分配间距：头像与昵称之间留出 8px，昵称与下拉箭头不再贴边，窄屏仍保持单行截断。
 - “设置 → 账号管理”的“续期全部微信授权”“一键清理”以及各页面同类的浅色次级操作按钮统一改为主色绿底白字，和“添加账号”保持一致的可见性；弹窗里的“取消”等中性按钮不受影响。
@@ -349,7 +653,7 @@ flowchart TB
 - 奶茶兑换商店购买失败不再返回合并提示，改为逐项说明：商品不存在/已下架、不支持钻石购买、店铺等级未达标、限购已用完、数量超过剩余限购、奶茶券或道具不足、结算期不可兑换；新旧两套协议实现保持一致。
 - 补充种子优先级回归测试；后端测试集 298 项、前端 16 项全部通过，前端类型检查与生产构建通过。
 
-### 2026-09-08 · NapCat QQ 扫码登录与 Docker 部署
+### 2026-09-08 · v3.2.2（#25） · NapCat QQ 扫码登录与 Docker 部署
 
 - 将 QQ MiniApp OpenAuth 能力直接集成到项目中，新增受管理后台鉴权保护的 NapCat 登录任务接口，可完成 QQ 扫码、确认登录、获取农场 Code、添加账号和退出临时 QQ 会话的完整流程。
 - “添加账号”新增按能力动态显示的“QQ 扫码”标签；进入标签后自动获取二维码，移除额外刷新按钮，支持点击二维码刷新，并在二维码过期前自动换新。
@@ -365,10 +669,10 @@ flowchart TB
 - 新增 `compose.sh` 启动入口，在 macOS 和 Linux 上自动读取宿主机名称并设置为 QQ 登录设备名称；仍可通过 `NAPCAT_DEVICE_NAME` 显式覆盖。
 - 新增 NapCat 登录任务、所有权隔离、登录状态识别、昵称同步、OpenAuth 就绪等待、刷新、重启残留会话与退出清理测试；后端完整测试集 273 项全部通过，并通过前端类型检查、生产构建、Compose 配置校验、派生镜像构建和容器启动冒烟检查。
 
-### 2026-09-01 · 公益小红花活动支持
+### 2026-09-01 · v3.2.0（#22） · 公益小红花活动支持
 - 活动奖励基本没有，图一乐。
 
-### 2026-09-01 · 好友成熟调度与访问治理
+### 2026-09-01 · v3.1.1（#21） · 好友成熟调度与访问治理
 
 - 根据好友摘要和土地生长阶段维护内存成熟计划，将固定 25～30 秒偷取轮询改为成熟时间驱动唤醒；好友摘要以 15 分钟低频校准，进程重启后渐进重建计划。
 - 每轮最多处理 12 个到期或明确可偷好友，并最多分批进入 3 个未知或过期好友农场补全土地状态，降低好友、地块较多时的瞬时请求量和计算压力。
@@ -381,7 +685,7 @@ flowchart TB
 - 新增成熟计划、访问串行化、批量降级、好友节奏和设备协议测试；后端完整测试集共 255 项全部通过。
 - 本次调整用于减少无效请求、批量失败放大和明显机器化节奏，不构成规避官方风控或账号安全保证；真实账号下的秒偷及时性和好友手动操作同步仍需实际运行观察，如有问题请及时反馈。
 
-### 2026-10-15 · v2.8.0 · 奶茶热销中活动与经营自动化
+### 2026-10-15 · v3.2.6（#28） · 奶茶热销中活动与经营自动化
 
 - 活动中心新增“奶茶热销中”，接入店铺开业与改名、营业额与升级、等级预览、奶茶配方与制作、员工雇佣与互动、打工工资、营业记录和排行榜查询，配套官方场景、弹窗及物品素材。
 - 接入活动商城、快乐值每日与档位奖励、成长基金奖励，手工操作复用后端动作与资源、限额校验；拒绝钻石购买，成长基金仅领取已解锁且达到条件的奖励。
@@ -394,14 +698,14 @@ flowchart TB
 - 补充活动查询与动作校验、活动时间边界、过期开关防回启、雇佣兜底、商城礼包购买及作物素材相关测试。
 - 前后端包版本统一更新为 `2.8.0`，同步 npm 锁文件中的包版本。
 
-### 2026-09-24 · v2.7.1 · 秋祈良愿与快乐不独享活动
+### 2026-09-24 · v3.2.5（#27） · 秋祈良愿与快乐不独享活动
 
 - 活动中心新增“秋祈良愿”和“快乐不独享”，展示活动时间、祈愿次数、待领取签文、快乐值、每日奖励和档位奖励，并补充对应活动素材与奖励配置。
 - 后端接入两项活动的查询、祈愿、领取签文、分享奖励、每日快乐值和档位奖励协议，增加烟花道具使用支持及活动边界校验。
 - “设置 → 账号设置 → 日常与活动”新增祈愿方向、自动祈愿、自动领取祈愿奖励、自动领取每日快乐值和自动领取档位奖励开关；活动结束后自动关闭历史开关并阻止后台任务继续执行。
 - 补充活动协议字段、物品与植物配置、奖励图标、活动页面和背包操作，完善活动状态同步、操作前置校验及相关自动化测试。
 
-### 2026-09-10 · v2.7.0 · 萌宠成长日记与变异效果补全
+### 2026-09-10 · v3.2.3（#26） · 萌宠成长日记与变异效果补全
 
 - 活动中心新增“萌宠成长日记”，支持比熊养成、爪印手记、拾物小铺、节令赠礼与宝藏护送，展示成长进度、每日次数、活动库存和奖励状态，并接入官方场景与物品素材。
 - “设置 → 账号设置 → 日常与活动”新增萌宠活动自动化配置，支持领养与领取比熊、自动投喂、自动寻宝、领取手记奖励和种子礼包、领取节令赠礼、开启护送宝藏、领取夺宝补偿及选择锦囊；资源不足时跳过，锦囊刷新仅使用免费额度。
@@ -410,7 +714,7 @@ flowchart TB
 - 补充晶辉、比熊和乐园变异的名称与图标，土地卡片新增晶辉动画效果。
 - 修复商城头像框购买状态识别，结合商城限购记录判断是否已购买，避免重复显示可购买状态。
 
-### 2026-09-08 · NapCat QQ 扫码登录与 Docker 部署
+### 2026-09-08 · v3.2.1（#23） · NapCat QQ 扫码登录与 Docker 部署
 
 - 将 QQ MiniApp OpenAuth 能力直接集成到项目中，新增受管理后台鉴权保护的 NapCat 登录任务接口，可完成 QQ 扫码、确认登录、获取农场 Code、添加账号和退出临时 QQ 会话的完整流程。
 - “添加账号”新增按能力动态显示的“QQ 扫码”标签；进入标签后自动获取二维码，移除额外刷新按钮，支持点击二维码刷新，并在二维码过期前自动换新。
@@ -426,10 +730,10 @@ flowchart TB
 - 新增 `compose.sh` 启动入口，在 macOS 和 Linux 上自动读取宿主机名称并设置为 QQ 登录设备名称；仍可通过 `NAPCAT_DEVICE_NAME` 显式覆盖。
 - 新增 NapCat 登录任务、所有权隔离、登录状态识别、昵称同步、OpenAuth 就绪等待、刷新、重启残留会话与退出清理测试；后端完整测试集 273 项全部通过，并通过前端类型检查、生产构建、Compose 配置校验、派生镜像构建和容器启动冒烟检查。
 
-### 2026-09-01 · 公益小红花活动支持
+### 2026-09-01 · v3.1.0（#20） · 公益小红花活动支持
 - 活动奖励基本没有，图一乐。
 
-### 2026-09-01 · 好友成熟调度与访问治理
+### 2026-09-01 · v3.0.18（#19） · 好友成熟调度与访问治理
 
 - 根据好友摘要和土地生长阶段维护内存成熟计划，将固定 25～30 秒偷取轮询改为成熟时间驱动唤醒；好友摘要以 15 分钟低频校准，进程重启后渐进重建计划。
 - 每轮最多处理 12 个到期或明确可偷好友，并最多分批进入 3 个未知或过期好友农场补全土地状态，降低好友、地块较多时的瞬时请求量和计算压力。
@@ -442,7 +746,7 @@ flowchart TB
 - 新增成熟计划、访问串行化、批量降级、好友节奏和设备协议测试；后端完整测试集共 255 项全部通过。
 - 本次调整用于减少无效请求、批量失败放大和明显机器化节奏，不构成规避官方风控或账号安全保证；真实账号下的秒偷及时性和好友手动操作同步仍需实际运行观察，如有问题请及时反馈。
 
-### 2026-08-26 · 雨落成诗活动适配
+### 2026-08-26 · v3.0.17（#18） · 雨落成诗活动适配
 
 - 活动中心接入“雨落成诗”，支持查看天气采集瓶、雷雨召唤瓶、雷电徽章、当前天气、采集次数、气象任务和气象研究节点。
 - 后端新增天气协议解析，接入活动查询、每日购买天气采集瓶、自动寻找雷雨好友采集、使用雷雨召唤瓶和解锁气象研究节点。
@@ -452,7 +756,7 @@ flowchart TB
 - 新增雨落成诗协议解析、活动边界、召唤瓶请求、闪电变异识别和奖励映射测试。
 - 个人地块界面新增闪电雷雨天气、作物闪电特效支持。
 
-### 2026-08-26 · 限时活动下线与开关防回启
+### 2026-08-26 · v3.0.16（#17） · 限时活动下线与开关防回启
 
 - 活动页隐藏即将到期的“心许千灯星垂野”相关内容，停止请求对应活动数据；无进行中活动时展示统一空态，管理员仍可进入活动分析。
 - “设置 → 日常与活动”隐藏心许千灯相关活动卡片，并同步处理旧版自动控制页面中的活动开关。
@@ -460,7 +764,7 @@ flowchart TB
 - 配置加载、配置提交和后台任务调度前统一强制关闭已隐藏活动开关，避免旧账号的历史开启状态导致过期任务继续运行或再次启动。
 - 新增隐藏活动开关防回启测试；后端完整测试集共 191 项全部通过，并通过前端类型检查和生产构建。
 
-### 2026-08-25 · 低配服务器资源治理与线程调度优化
+### 2026-08-25 · v3.0.15（#16） · 低配服务器资源治理与线程调度优化
 
 - 新增自动资源档位识别，根据 CPU 核数和物理内存选择调度策略；2 核或不超过 2.5GB 内存的服务器会自动采用保守配置，无需手动开启低配模式。
 - 账号 Worker 改为分批、错峰启动，低配环境默认逐个初始化并增加启动间隔，降低多账号同时加载模块和 TSDK/WASM 时的 CPU、磁盘与内存峰值。
@@ -472,7 +776,7 @@ flowchart TB
 - 低配环境在进程 RSS 接近物理内存 80% 时暂停启动新账号，避免继续扩容导致系统 OOM；不设置固定账号数量上限，也不会自动停止已经运行的账号。
 - 补充调度器生命周期测试；完整测试集共 186 项全部通过。
 
-### 2026-08-21 · 背包种子排序与选种策略精简
+### 2026-08-21 · v3.0.13（#15） · 背包种子排序与选种策略精简
 
 - “背包种子优先”改为后端自动维护顺序，不再提供恢复默认、拖拽、上下移动或删除等手动调整操作。
 - 种子按官方客户端规则排列：稀有种子优先，其次按作物经验降序，同经验按种子 ID 升序；页面展示与实际种植共用同一规则。
@@ -482,7 +786,7 @@ flowchart TB
 - 删除“优先种植种子”策略及相关配置、执行分支和界面选项；旧主策略自动回退到“最大经验/时”，旧第二优先策略自动回退到“最高等级作物”。
 - 修复 2×2 种植路径调用未定义 `getBagSeedPriority` 导致的运行错误，并补充官方背包顺序和旧策略迁移测试。
 
-### 2026-08-20 · 活动礼包与钻石余额
+### 2026-08-20 · v3.0.12（#13） · 活动礼包与钻石余额
 
 - 道具商城新增鹊桥寄情礼包、千星每日礼包和两档千星礼包，支持展示折扣、每日/活动限购数量及已购进度。
 - 按官方商品数据区分购买货币：`1027`、`1028` 使用钻石，`1029` 使用点券；商品卡、余额判断和购买确认文案保持一致。
@@ -493,7 +797,7 @@ flowchart TB
 - 手动填码支持直接粘贴官方 WebSocket 完整 URL：自动提取 `code`、`platform` 和 `ver`，并在保存账号时校准系统客户端版本。
 - 补充商城价格货币与限购协议测试，并通过前端类型检查和生产构建。
 
-### 2026-08-19 · 内置微信扫码、版本同步与运行自愈
+### 2026-08-19 · v3.0.11（#12） · 内置微信扫码、版本同步与运行自愈
 
 - 移植进程内应用宝登录协议：通过微信 OAuth 扫码取得会话，再由内置 MMTLS 协议换取农场微信小游戏 Code，不再要求额外部署 YYB-GO 或第三方登录服务。
 - “添加账号”开放微信扫码标签；进入标签后自动获取二维码，二维码空态和按钮均可手动获取或刷新。
@@ -512,17 +816,17 @@ flowchart TB
 - 账号接口不再接受客户端直接提交 `loginBuffer`、Refresh Token 或 Access Token；更换 `wxid` 时自动清空旧凭据，只有与当前面板用户绑定的有效扫码会话可以写入新凭据。
 - 本次未包含业务请求合并、心跳请求容量预留和资源包完整性校验；这些运行质量优化仍属于后续范围。
 
-### 2026-08-18 · 鹊桥寄情活动
+### 2026-08-18 · v3.0.10（#11） · 鹊桥寄情活动
 
 - 支持自动使用、自动构建和自动指定好友赠送。
 - 当前功能尚未完成全面测试。
 
-### 2026-08-17 · 未来活动分析
+### 2026-08-17 · v3.0.9（#10） · 未来活动分析
 
 - 活动页新增未来活动分析功能。
 - 活动正式接入仍需要采集对应数据。
 
-### 2026-08-14 · 土地变异效果
+### 2026-08-14 · v3.0.8（#9） · 土地变异效果
 
 - “个人 → 我的农场 → 土地详情”新增作物变异效果展示，支持黄金、冰冻、爱心、暗化和湿润效果。
 - 根据官方 `mutant_effect_plant` 配置映射变异作物，黄金变异可展示对应的金色植物贴图，并兼容多种变异组合。
@@ -530,12 +834,12 @@ flowchart TB
 - 所有变异动画限制在当前作物区域内，并调整作物锚点，使作物及特效更贴近菱形土地的视觉中心。
 - 土地详情展示变异效果的实际作用，例如售价倍数、产量倍数或黄金果实产出。
 
-### 2026-08-13 · 青酿换万金活动
+### 2026-08-13 · v3.0.7（#8） · 青酿换万金活动
 
 - 新增活动页面。
 - “自动控制 → 活动控制”中新增自动开关。
 
-### 2026-08-07 · 手机抓包登录
+### 2026-08-07 · v3.0.6（#7） · 手机抓包登录
 
 - 内置纯 Node.js 抓包服务，默认嵌入 Bot 进程，无需单独启动服务或端口。
 - 手机设置 Wi-Fi 代理后打开 QQ 农场，即可自动获取登录 Code 并添加账号。
@@ -543,21 +847,21 @@ flowchart TB
 - 获取 Code 的同时解析好友 GID，并在后台同步 QQ 平台好友列表。
 - 详细步骤见[抓包登录服务手册](../core/docs/capture-service.md)。
 
-### 2026-08-03 · 土地展示重做
+### 2026-08-03 · v3.0.5（#6） · 土地展示重做
 
 - 参考游戏内农场布局，实现等距视角土地展示。
 - 完善普通作物各生长阶段图片。
 - 完善四格作物展示，并使用官方资源生成对应图片。
 - 新增土地资源图片更新指令。
 
-### 2026-08-03 · 生涯统计与体验优化
+### 2026-08-03 · v3.0.3（#5） · 生涯统计与体验优化
 
 - 点击头像即可查看生涯统计。
 - 新增神秘商人自动购买开关。
 - 修复每日任务进度展示错误。
 - 修复种子获取策略问题。
 
-### 2026-08-03 · 心许千灯星垂野活动
+### 2026-08-03 · v3.0.2（#3） · 心许千灯星垂野活动
 
 - 新增活动页面，可查看活动进度、星砂余额和奖励状态。
 - 支持“观星礼录”奖励领取与“星砂兑换商店”奖励批量兑换。
@@ -565,14 +869,14 @@ flowchart TB
 - 新增“千星游记”和“观星礼录”自动领取选项，每 5 分钟检查一次。
 - 补充活动作物、种子、装扮等奖励配置及活动专属图片资源。
 
-### 2026-08-03 · TSDK/WASM 协议更新
+### 2026-08-03 · v3.0.1（#2） · TSDK/WASM 协议更新
 
 - TSDK/WASM 升级至官方 `v3.8.6.1785240280`，适配新版运行时、数据段解密和完整性校验。
 - 更新默认 WASM 文件及 SHA-256 校验，确保网关 Token、ACE 心跳和多账号运行正常。
 - 新增 TSDK/WASM 更新检查工具，可比较版本、导入导出、数据段和关键运行参数。
 - 补充标准更新、验证与回退流程。
 
-### 2026-08-03 · 2×2 作物种植
+### 2026-08-03 · v3.0.0（#1） · 2×2 作物种植
 
 - 修复活动四格作物“星语铃花”的占地配置，背包中增加 2×2 标识。
 - 优化四格作物土地预留策略，优先选择已清空土地更多的区域。

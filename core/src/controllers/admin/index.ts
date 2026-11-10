@@ -20,9 +20,8 @@ const { mountFarmRoutes } = require('./farm-routes');
 const { mountFriendRoutes } = require('./friend-routes');
 const { mountActivityCenterRoutes } = require('./activity-center-routes');
 const { mountCommerceRoutes } = require('./commerce-routes');
+const { mountCareerRoutes } = require('./career-routes');
 const { mountPanelNotificationRoutes } = require('./panel-notification-routes');
-const { mountRuntimeDiagnosticsRoutes } = require('./runtime-diagnostics-routes');
-const { startRuntimeDiagnostics } = require('../../services/runtime-diagnostics');
 const { mountWxLoginRoutes } = require('./wx-login-routes');
 const { mountQqLoginRoutes } = require('./qq-login-routes');
 const {
@@ -40,7 +39,6 @@ function startAdminServer(dataProvider: any): void {
     if (ctx) return;
 
     ctx = createAdminContext(dataProvider);
-    startRuntimeDiagnostics();
 
     const app = express();
     app.set('trust proxy', true);
@@ -85,8 +83,8 @@ function startAdminServer(dataProvider: any): void {
     mountAccountRoutes(app, ctx);
     mountActivityCenterRoutes(app, ctx);
     mountCommerceRoutes(app, ctx);
+    mountCareerRoutes(app, ctx);
     mountPanelNotificationRoutes(app, ctx);
-    mountRuntimeDiagnosticsRoutes(app, ctx);
 
     // SPA fallback
     app.get('*', (req: any, res: any) => {

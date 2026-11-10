@@ -18,7 +18,6 @@ const { performDailyMonthCardGift, getMonthCardDailyState } = require('../servic
 const { performDailyVipGift, getVipDailyState } = require('../services/qqvip');
 const { runExclusiveAutomationTask } = require('../services/automation-lock');
 const { createScheduler, getSchedulerRegistrySnapshot } = require('../services/scheduler');
-const { readProcessMetrics } = require('../services/runtime-diagnostics');
 const { checkDailyShareStatus, getShareDailyState } = require('../services/share');
 const { refreshActivityWindows } = require('../services/activity-windows');
 const { resetSessionGains, recordOperation, initStatsWithPersistence, saveStats } = require('../services/stats');
@@ -38,6 +37,7 @@ const { checkAndClaimDogSkillGifts } = require('../services/dog-skill-gifts');
 const { isGatewayHealthyForBusiness, nextBusinessBackoffMs } = require('../utils/low-priority-gate');
 const { connect, cleanup, getWs, getUserState, networkEvents, getGatewayLoad } = require('../utils/network');
 const { loadProto } = require('../utils/proto');
+const { formatDurationZh } = require('../utils/net-diagnosis-text');
 const { runWithRequestClass } = require('../utils/request-context');
 const { setLogHook, log, logWarn, logFileOnly, toNum, getSystemDateKey, formatSystemDateTime24 } = require('../utils/utils');
 const { getRequestProfile, isForegroundActive } = require('../utils/request-governor');
@@ -271,10 +271,10 @@ function describeGatewayStall(load: any): string {
     const misses = Number(load && load.heartbeatMisses) || 0;
     const oldest = Number(load && load.oldestPendingAgeMs) || 0;
     if (misses > 0) parts.push(`心跳漏 ${misses} 次`);
-    if (oldest > 0) parts.push(`最老在途 ${(oldest / 1000).toFixed(1)}s`);
-    parts.push(`pending=${Number(load && load.pending) || 0}`);
-    parts.push(`queued=${Number(load && load.queued) || 0}`);
-    return parts.join(', ');
+    if (oldest > 0) parts.push(`最老在途 ${formatDurationZh(oldest)}`);
+    parts.push(`等待回包 ${Number(load && load.pending) || 0} 个`);
+    parts.push(`排队 ${Number(load && load.queued) || 0} 个`);
+    return parts.join('、');
 }
 
 /**
@@ -300,7 +300,7 @@ function nextBusinessTickDeferMs(kind: string): number {
     const backoffMs = nextBusinessBackoffMs(businessBackoffMs[kind]);
     businessBackoffMs[kind] = backoffMs;
     if (firstDefer) {
-        logWarn('系统', `网关无回包，${BUSINESS_TICK_LABEL[kind]}退避 ${Math.round(backoffMs / 1000)}s (${describeGatewayStall(load)})`, {
+        logWarn('系统', `网关无回包，${BUSINESS_TICK_LABEL[kind]}退避 ${formatDurationZh(backoffMs)}（${describeGatewayStall(load)}）`, {
             module: 'system',
             event: '网关退避',
             result: 'defer',
@@ -1013,6 +1013,10 @@ async function handleApiCall(msg: any): Promise<void> {
             case 'getLands':
                 result = await getLandsDetail(args[0] === true);
                 break;
+            case 'getCareerProfile':
+                // 个人页（角色生涯）：按当前账号自己的 GID 拉取完整收获明细。
+                result = await require('../services/career').getCareerProfile(getUserState().gid);
+                break;
             case 'getIllustratedSnapshot':
                 result = await require('../services/illustrated').getIllustratedSnapshot();
                 break;
@@ -1351,11 +1355,7 @@ async function handleApiCall(msg: any): Promise<void> {
                 result = await require('../services/commerce').purchaseMysteryOffer(args[0], 'manual');
                 break;
             case 'getSchedulers':
-                // 附带账号 Worker 进程读数，供首页「账号堆内存」等运行诊断指标使用。
-                result = {
-                    ...getSchedulerRegistrySnapshot(),
-                    processMetrics: readProcessMetrics(),
-                };
+                result = getSchedulerRegistrySnapshot();
                 break;
             default:
                 error = 'Unknown method';
