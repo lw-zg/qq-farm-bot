@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api, { getApiErrorMessage } from '@/api'
+import { parseHourOfDay } from '@/utils/hour-of-day'
 import { normalizeNotificationTemplates } from '@/utils/notification-template'
 
 export interface MilkTeaSeedPolicy {
@@ -224,6 +225,9 @@ export interface SettingsState {
   fertilizerBuyNormalCount: number
   fertilizerBuyNormalThresholdHours: number
   fertilizerBuyCheckIntervalMinutes: number
+  emailClaimHour: number
+  goldenBugKeepCount: number
+  goldenBugRoundLimit: number
   autoAcceptFriendMinLevel: number
   autoAcceptRequireOwnLevel: boolean
   autoAcceptHarvestStealEnabled: boolean
@@ -250,6 +254,9 @@ type SaveableSettingsKey
     | 'fertilizerBuyNormalCount'
     | 'fertilizerBuyNormalThresholdHours'
     | 'fertilizerBuyCheckIntervalMinutes'
+    | 'emailClaimHour'
+    | 'goldenBugKeepCount'
+    | 'goldenBugRoundLimit'
     | 'autoAcceptFriendMinLevel'
     | 'autoAcceptRequireOwnLevel'
     | 'autoAcceptHarvestStealEnabled'
@@ -277,6 +284,9 @@ const SAVEABLE_SETTINGS_KEYS: SaveableSettingsKey[] = [
   'fertilizerBuyNormalCount',
   'fertilizerBuyNormalThresholdHours',
   'fertilizerBuyCheckIntervalMinutes',
+  'emailClaimHour',
+  'goldenBugKeepCount',
+  'goldenBugRoundLimit',
   'autoAcceptFriendMinLevel',
   'autoAcceptRequireOwnLevel',
   'autoAcceptHarvestStealEnabled',
@@ -354,6 +364,9 @@ function createDefaultSettings(): SettingsState {
     fertilizerBuyNormalCount: 10,
     fertilizerBuyNormalThresholdHours: 10,
     fertilizerBuyCheckIntervalMinutes: 30,
+    emailClaimHour: 10,
+    goldenBugKeepCount: 0,
+    goldenBugRoundLimit: 24,
     autoAcceptFriendMinLevel: 0,
     autoAcceptRequireOwnLevel: false,
     autoAcceptHarvestStealEnabled: true,
@@ -414,6 +427,9 @@ export const useSettingStore = defineStore('setting', () => {
       fertilizerBuyNormalCount: data.fertilizerBuyNormalCount ?? defaults.fertilizerBuyNormalCount,
       fertilizerBuyNormalThresholdHours: data.fertilizerBuyNormalThresholdHours ?? defaults.fertilizerBuyNormalThresholdHours,
       fertilizerBuyCheckIntervalMinutes: data.fertilizerBuyCheckIntervalMinutes ?? defaults.fertilizerBuyCheckIntervalMinutes,
+      emailClaimHour: data.emailClaimHour ?? defaults.emailClaimHour,
+      goldenBugKeepCount: data.goldenBugKeepCount ?? defaults.goldenBugKeepCount,
+      goldenBugRoundLimit: data.goldenBugRoundLimit ?? defaults.goldenBugRoundLimit,
       autoAcceptFriendMinLevel: data.autoAcceptFriendMinLevel ?? defaults.autoAcceptFriendMinLevel,
       autoAcceptRequireOwnLevel: data.autoAcceptRequireOwnLevel ?? defaults.autoAcceptRequireOwnLevel,
       autoAcceptHarvestStealEnabled: data.autoAcceptHarvestStealEnabled ?? defaults.autoAcceptHarvestStealEnabled,
@@ -472,8 +488,23 @@ export const useSettingStore = defineStore('setting', () => {
         (payload as any)[key] = cloneValue(newSettings[key])
     }
 
-    if (Object.keys(payload).length === 0)
-      return { ok: false, error: '没有需要保存的设置' }
+    // 后端对 emailClaimHour 有硬校验（非 0–23 整数直接抛 INVALID_CONFIG，整份快照都不生效）。
+    // 设置页保存前已经拦过一次，这里兜住其它调用点：非法值就地剔除，别连累同一批的其它设置。
+    const hasEmailClaimHour = Object.prototype.hasOwnProperty.call(payload, 'emailClaimHour')
+    const emailClaimHour = parseHourOfDay((payload as any).emailClaimHour)
+    if (hasEmailClaimHour) {
+      if (emailClaimHour === null)
+        delete (payload as any).emailClaimHour
+      else
+        (payload as any).emailClaimHour = emailClaimHour
+    }
+
+    if (Object.keys(payload).length === 0) {
+      return {
+        ok: false,
+        error: hasEmailClaimHour ? '自动邮箱领取时间需为 0–23 的整数（时）' : '没有需要保存的设置',
+      }
+    }
 
     beginRequest()
     try {

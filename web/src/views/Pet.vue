@@ -34,6 +34,21 @@ const foodPercent = computed(() => {
   const maximum = Math.max(maxSeconds.value || 0, 1)
   return Math.min(100, Math.max(0, (remainSeconds.value / maximum) * 100))
 })
+// 上游 PR #125 的 durationLow：守护剩余不足一天时给出醒目提示，避免宠物断粮。
+const durationLow = computed(() => !!deployed.value && remainSeconds.value < 86400)
+
+// 上游 PR #125 的 rarityTone：稀有度药丸徽章，4+ 金 / 3 蓝 / 2 绿 / 其余灰。
+// rarity 与 rarityLabel 后端和 store 早已下发，这里只补显示，不动接口与数据结构。
+type RarityTone = 'gold' | 'blue' | 'green' | 'plain'
+function rarityTone(rarity: number): RarityTone {
+  if (rarity >= 4)
+    return 'gold'
+  if (rarity === 3)
+    return 'blue'
+  if (rarity === 2)
+    return 'green'
+  return 'plain'
+}
 
 function getFeedCount(foodId: number) {
   return feedCounts[foodId] ?? 1
@@ -47,6 +62,17 @@ function setFeedCount(foodId: number, value: number, available: number) {
 function invalidFeedCount(foodId: number, available: number) {
   const count = getFeedCount(foodId)
   return !Number.isInteger(count) || count < 1 || count > Math.min(available, 99)
+}
+
+/** 上游 PR #125 的 feedTitle：按钮灰着时告诉用户具体原因，可用时说明本次份数。 */
+function feedTitle(food: { id: number, count: number }) {
+  if (food.count <= 0)
+    return '狗盆中没有该狗粮'
+  if (usingFood.value)
+    return '正在喂食中'
+  if (invalidFeedCount(food.id, food.count))
+    return '喂食份数需为 1–库存之间的整数'
+  return `立即喂食 ${getFeedCount(food.id)} 份`
 }
 
 function duration(seconds: number) {
@@ -117,7 +143,15 @@ async function action(run: () => Promise<any>, message: string) {
   }
 }
 
-watch([currentAccountId, tab], load)
+// 切页签不要重新拉整份数据，更不能用服务端值覆盖「资本模式」里还没保存的草稿；
+// 只有切换账号 / 首次进入 / 手动点刷新才重新同步配置。日志页单独补拉一次即可。
+watch(currentAccountId, load)
+watch(tab, (next) => {
+  const id = String(currentAccountId.value || '')
+  if (!id || next !== 'logs')
+    return
+  void Promise.resolve(petStore.fetchProtectLogs(id)).catch(() => null)
+})
 onMounted(load)
 </script>
 
@@ -176,9 +210,12 @@ onMounted(load)
                   {{ deployed ? '守护中' : '未派出' }}
                 </span>
               </div>
-              <h2 class="truncate text-lg text-gray-900 font-semibold dark:text-gray-100">
-                {{ deployed?.name || '选择一只宠物开始守护' }}
-              </h2>
+              <div class="min-w-0 flex items-center gap-2">
+                <h2 class="min-w-0 truncate text-lg text-gray-900 font-semibold dark:text-gray-100">
+                  {{ deployed?.name || '选择一只宠物开始守护' }}
+                </h2>
+                <span v-if="deployed" class="pet-rarity" :class="`pet-rarity--${rarityTone(deployed.rarity)}`">{{ deployed.rarityLabel }}</span>
+              </div>
               <p class="mt-0.5 hidden truncate text-xs text-gray-500 sm:block dark:text-gray-400">
                 {{ deployed?.skillDescription || `已拥有 ${ownedCount} 只宠物` }}
               </p>
@@ -220,10 +257,13 @@ onMounted(load)
                   <span v-else class="i-fas-paw text-xl text-gray-300 dark:text-gray-500" />
                 </div>
                 <div class="min-w-0 flex-1 pt-0.5">
-                  <div class="flex items-start justify-between gap-1">
-                    <h3 class="truncate text-sm text-gray-900 font-semibold dark:text-gray-100" :title="dog.name">
-                      {{ dog.name }}
-                    </h3>
+                  <div class="min-w-0 flex items-start justify-between gap-1">
+                    <div class="min-w-0 flex items-center gap-1">
+                      <h3 class="min-w-0 truncate text-sm text-gray-900 font-semibold dark:text-gray-100" :title="dog.name">
+                        {{ dog.name }}
+                      </h3>
+                      <span class="pet-rarity" :class="`pet-rarity--${rarityTone(dog.rarity)}`">{{ dog.rarityLabel }}</span>
+                    </div>
                     <span v-if="dog.owned" class="shrink-0 text-[11px] text-gray-400">Lv.{{ dog.level || 1 }}</span>
                   </div>
                   <p class="dog-description line-clamp-2 mt-1 text-[11px] text-gray-500 leading-4 dark:text-gray-400" :title="(dog.skillDescription || dog.obtainCondition) || undefined">
@@ -258,13 +298,24 @@ onMounted(load)
                 <p class="flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
                   <span class="i-carbon-time" />守护剩余时长
                 </p>
-                <strong class="mt-1 block truncate text-xl text-gray-900 font-mono font-bold dark:text-gray-100" :title="duration(remainSeconds)">{{ duration(remainSeconds) }}</strong>
+                <strong
+                  class="mt-1 block truncate text-xl font-mono font-bold"
+                  :class="durationLow ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-gray-100'"
+                  :title="duration(remainSeconds)"
+                >{{ duration(remainSeconds) }}</strong>
               </div>
               <span class="rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:bg-gray-700 dark:text-gray-300">上限 {{ duration(maxSeconds) }}</span>
             </div>
             <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-700">
-              <div class="h-full rounded-full bg-[var(--theme-primary)] transition-all" :style="{ width: `${foodPercent}%` }" />
+              <div
+                class="h-full rounded-full transition-all"
+                :class="durationLow ? 'bg-red-500 dark:bg-red-400' : 'bg-[var(--theme-primary)]'"
+                :style="{ width: `${foodPercent}%` }"
+              />
             </div>
+            <p v-if="durationLow" class="mt-2 flex items-center gap-1 text-xs text-red-600 dark:text-red-400">
+              <span class="i-carbon-warning-alt" />守护剩余不足 1 天，建议补充狗粮
+            </p>
           </div>
 
           <div class="flex shrink-0 items-center justify-between px-3 pb-1 pt-3 sm:px-4">
@@ -321,7 +372,7 @@ onMounted(load)
                     <span class="i-carbon-add" />
                   </button>
                 </div>
-                <BaseButton size="sm" class="h-8 shrink-0 px-3!" :disabled="!food.count || usingFood || invalidFeedCount(food.id, food.count)" @click="action(() => petStore.useDogFood(String(currentAccountId), food.id, getFeedCount(food.id)), '喂食成功')">
+                <BaseButton size="sm" class="h-8 shrink-0 px-3!" :title="feedTitle(food)" :disabled="!food.count || usingFood || invalidFeedCount(food.id, food.count)" @click="action(() => petStore.useDogFood(String(currentAccountId), food.id, getFeedCount(food.id)), '喂食成功')">
                   喂食
                 </BaseButton>
               </div>
@@ -483,6 +534,39 @@ onMounted(load)
 
 .dog-card {
   min-height: 116px;
+}
+
+/* 上游 PR #125 的稀有度药丸徽章：配色沿用本地 --ui-* 令牌，亮/暗模式自动切换。 */
+.pet-rarity {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.pet-rarity--gold {
+  color: var(--ui-warning);
+  background: var(--ui-warning-soft);
+}
+
+.pet-rarity--blue {
+  color: var(--ui-blue);
+  background: var(--ui-blue-soft);
+}
+
+.pet-rarity--green {
+  color: var(--ui-primary);
+  background: var(--ui-primary-soft);
+}
+
+.pet-rarity--plain {
+  color: var(--ui-muted);
+  background: var(--ui-surface-soft);
 }
 
 .pet-guardian-strip {

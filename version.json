@@ -1,12 +1,116 @@
 {
   "major": 3,
-  "minor": 13,
-  "patch": 0,
-  "build": 109,
-  "version": "3.13.0",
-  "updatedAt": "2026-11-10T00:12:42.899Z",
-  "lastCommit": "8363558f",
+  "minor": 17,
+  "patch": 3,
+  "build": 123,
+  "version": "3.17.3",
+  "updatedAt": "2026-11-10T20:17:25.201Z",
+  "lastCommit": "f22b21b8",
   "history": [
+    {
+      "version": "3.17.3",
+      "build": 123,
+      "date": "2026-11-11",
+      "summary": "fix(version): 修正 CHANGELOG 标题版本号误判，补上 hook 回归测试",
+      "commit": "f22b21b8",
+      "type": "patch"
+    },
+    {
+      "version": "3.17.2",
+      "build": 122,
+      "date": "2026-11-11",
+      "summary": "fix(core): 复核运行完整性，补修 v3.17.1 分项开关实时性回归",
+      "commit": "c4a1640f",
+      "type": "patch"
+    },
+    {
+      "version": "3.17.1",
+      "build": 121,
+      "date": "2026-11-11",
+      "summary": "fix(core): 收口 visit-strategy 二次开关判断，options 成为单次好友访问唯一决策来源",
+      "commit": "1a1be415",
+      "type": "patch"
+    },
+    {
+      "version": "3.17.0",
+      "build": 120,
+      "date": "2026-11-11",
+      "summary": "feat(web): 落地上游 PR #125 稀有度徽章，宠物卡片显示四档稀有度",
+      "commit": "9106971f",
+      "type": "minor"
+    },
+    {
+      "version": "3.16.2",
+      "build": 119,
+      "date": "2026-11-11",
+      "summary": "fix(core/web): 复核前两次上游同步，补修 3 处漏网缺陷并逐条对账 24 项",
+      "commit": "497c226e",
+      "type": "patch"
+    },
+    {
+      "version": "3.16.1",
+      "build": 118,
+      "date": "2026-11-11",
+      "summary": "fix(core/web): 全仓完整性体检，修复 14 处逻辑缺陷并补齐回归测试",
+      "commit": "450266f0",
+      "type": "patch"
+    },
+    {
+      "version": "3.16.0",
+      "build": 117,
+      "date": "2026-11-10",
+      "summary": "feat(web): 同步上游 PR #125 评估并等价落地宠物页可用性改进",
+      "commit": "b0a1f456",
+      "type": "minor"
+    },
+    {
+      "version": "3.15.6",
+      "build": 116,
+      "date": "2026-11-10",
+      "summary": "chore(web): 补齐 tests 与样式检查范围，格式化后 web 全仓 lint 清零",
+      "commit": "a264fe0f",
+      "type": "patch"
+    },
+    {
+      "version": "3.15.5",
+      "build": 115,
+      "date": "2026-11-10",
+      "summary": "fix(core): 种植轮闸门缓存失效判断修正，清理死代码并清空 core lint",
+      "commit": "39b871f0",
+      "type": "patch"
+    },
+    {
+      "version": "3.15.3",
+      "build": 113,
+      "date": "2026-11-10",
+      "summary": "fix(web/core): 邮箱时刻输入非法不再拖垮整份设置保存，并给两份 hour-of-day 加一致性测试",
+      "commit": "1374aa1a",
+      "type": "patch"
+    },
+    {
+      "version": "3.15.2",
+      "build": 112,
+      "date": "2026-11-10",
+      "summary": "fix(core): 好友 tick 不再套自动化锁，修复与内部 detached 调用互相等死的死锁",
+      "commit": "0914db06",
+      "type": "patch"
+    },
+    {
+      "version": "3.15.1",
+      "build": 111,
+      "date": "2026-11-10",
+      "summary": "fix(web): QQ 账号卡片底部横线与微信卡片对齐，手机端显示今日成功次数",
+      "commit": "3b4cd7fb",
+      "type": "patch"
+    },
+    {
+      "version": "3.15.0",
+      "build": 110,
+      "date": "2026-11-10",
+      "summary": "feat(core/web): 同步上游 20261109 更新（PR #122-#124），采纳邮件定时检查、种植延迟生效与图片懒加载",
+      "commit": "158473a2",
+      "type": "minor"
+    },
     {
       "version": "3.13.0",
       "build": 109,

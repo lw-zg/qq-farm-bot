@@ -2,6 +2,7 @@ import type { AccountConfig, AutomationConfig, BagSeedFallbackStrategy, CapitalM
 export {};
 
 const sharedState = require('./shared-state');
+const { assertEmailClaimHour } = require('../../utils/hour-of-day');
 const { readKnownFriendGidsCache, writeKnownFriendGidsCache } = require('./gid-cache');
 
 const {
@@ -12,6 +13,7 @@ const {
     normalizeKnownFriendGids,
     normalizeKnownFriendGidSyncCooldownSec,
     normalizeFriendsListCacheTtlSec,
+    normalizeEmailClaimHour,
     normalizeBagSeedPriority,
     normalizeBagSeedLandTypes,
     normalizeBagSeedFallbackStrategy,
@@ -54,6 +56,7 @@ function getAccountConfigSnapshot(accountId?: unknown): AccountConfig {
 }
 
 function setAccountConfigSnapshot(accountId: unknown, nextConfig: Partial<AccountConfig>, persist: boolean = true): AccountConfig {
+    if (Object.hasOwn(nextConfig, 'emailClaimHour')) assertEmailClaimHour(nextConfig.emailClaimHour);
     // Initialization must happen before changing memory; a first direct call can
     // otherwise reload old data over the configuration it is about to save.
     const persistence = persist ? require('./global-config') : null;
@@ -123,6 +126,9 @@ function getConfigSnapshot(accountId?: unknown): AccountConfig & { ui: typeof gl
         fertilizerBuyNormalCount: Math.max(0, Math.min(10000, Number(cfg.fertilizerBuyNormalCount) || 0)),
         fertilizerBuyNormalThresholdHours: Math.max(0, Math.min(990, Number(cfg.fertilizerBuyNormalThresholdHours) || 0)),
         fertilizerBuyCheckIntervalMinutes: Math.max(1, Math.min(1440, Number(cfg.fertilizerBuyCheckIntervalMinutes) || 30)),
+        emailClaimHour: normalizeEmailClaimHour(cfg.emailClaimHour, sharedState.DEFAULT_ACCOUNT_CONFIG.emailClaimHour),
+        goldenBugKeepCount: Math.max(0, Math.min(10000, Math.floor(Number(cfg.goldenBugKeepCount) || 0))),
+        goldenBugRoundLimit: Math.max(1, Math.min(100, Math.floor(Number(cfg.goldenBugRoundLimit) || sharedState.DEFAULT_ACCOUNT_CONFIG.goldenBugRoundLimit))),
         bagSeedPriority: [...(cfg.bagSeedPriority || [])],
         bagSeedMultiLandReservationEnabled: !!cfg.bagSeedMultiLandReservationEnabled,
         bagSeedLandTypes: cloneBagSeedLandTypes(cfg.bagSeedLandTypes),
@@ -144,6 +150,7 @@ interface ApplyConfigSnapshotOptions {
 
 function applyConfigSnapshot(snapshot: Record<string, any> | undefined, options: ApplyConfigSnapshotOptions = {}): ReturnType<typeof getConfigSnapshot> {
     const cfg: Record<string, any> = snapshot || {};
+    if (Object.hasOwn(cfg, 'emailClaimHour')) assertEmailClaimHour(cfg.emailClaimHour);
     const persist = options.persist !== false;
     const accountId = options.accountId;
     if (persist) require('./global-config');
@@ -266,6 +273,18 @@ function applyConfigSnapshot(snapshot: Record<string, any> | undefined, options:
 
     if (cfg.fertilizerBuyCheckIntervalMinutes !== undefined && cfg.fertilizerBuyCheckIntervalMinutes !== null) {
         next.fertilizerBuyCheckIntervalMinutes = Math.max(1, Math.min(1440, Number(cfg.fertilizerBuyCheckIntervalMinutes) || 30));
+    }
+
+    if (cfg.emailClaimHour !== undefined) {
+        next.emailClaimHour = normalizeEmailClaimHour(cfg.emailClaimHour, next.emailClaimHour);
+    }
+
+    if (cfg.goldenBugKeepCount !== undefined && cfg.goldenBugKeepCount !== null) {
+        next.goldenBugKeepCount = Math.max(0, Math.min(10000, Math.floor(Number(cfg.goldenBugKeepCount) || 0)));
+    }
+
+    if (cfg.goldenBugRoundLimit !== undefined && cfg.goldenBugRoundLimit !== null) {
+        next.goldenBugRoundLimit = Math.max(1, Math.min(100, Math.floor(Number(cfg.goldenBugRoundLimit) || next.goldenBugRoundLimit)));
     }
 
     if (cfg.bagSeedPriority !== undefined && cfg.bagSeedPriority !== null) {

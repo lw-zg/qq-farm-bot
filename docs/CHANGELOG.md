@@ -14,6 +14,19 @@
 
 | 版本 | 更新序号 | 日期 | 更新内容 | 提交 |
 | --- | --- | --- | --- | --- |
+| v3.17.3 | #123 | 2026-11-11 | fix(version): 修正 CHANGELOG 标题版本号误判，补上 hook 回归测试 | `f22b21b8` |
+| v3.17.2 | #122 | 2026-11-11 | fix(core): 复核运行完整性，补修 v3.17.1 分项开关实时性回归 | `c4a1640f` |
+| v3.17.1 | #121 | 2026-11-11 | fix(core): 收口 visit-strategy 二次开关判断，options 成为单次好友访问唯一决策来源 | `1a1be415` |
+| v3.17.0 | #120 | 2026-11-11 | feat(web): 落地上游 PR #125 稀有度徽章，宠物卡片显示四档稀有度 | `9106971f` |
+| v3.16.2 | #119 | 2026-11-11 | fix(core/web): 复核前两次上游同步，补修 3 处漏网缺陷并逐条对账 24 项 | `497c226e` |
+| v3.16.1 | #118 | 2026-11-11 | fix(core/web): 全仓完整性体检，修复 14 处逻辑缺陷并补齐回归测试 | `450266f0` |
+| v3.16.0 | #117 | 2026-11-10 | feat(web): 同步上游 PR #125 评估并等价落地宠物页可用性改进 | `b0a1f456` |
+| v3.15.6 | #116 | 2026-11-10 | chore(web): 补齐 tests 与样式检查范围，格式化后 web 全仓 lint 清零 | `a264fe0f` |
+| v3.15.5 | #115 | 2026-11-10 | fix(core): 种植轮闸门缓存失效判断修正，清理死代码并清空 core lint | `39b871f0` |
+| v3.15.3 | #113 | 2026-11-10 | fix(web/core): 邮箱时刻输入非法不再拖垮整份设置保存，并给两份 hour-of-day 加一致性测试 | `1374aa1a` |
+| v3.15.2 | #112 | 2026-11-10 | fix(core): 好友 tick 不再套自动化锁，修复与内部 detached 调用互相等死的死锁 | `0914db06` |
+| v3.15.1 | #111 | 2026-11-10 | fix(web): QQ 账号卡片底部横线与微信卡片对齐，手机端显示今日成功次数 | `3b4cd7fb` |
+| v3.15.0 | #110 | 2026-11-10 | feat(core/web): 同步上游 20261109 更新（PR #122-#124），采纳邮件定时检查、种植延迟生效与图片懒加载 | `158473a2` |
 | v3.13.0 | #109 | 2026-11-10 | feat(core): 网关诊断日志改为中文文案，压力/超时/心跳/让路不再输出英文键值 | `8363558f` |
 | v3.12.0 | #108 | 2026-11-10 | feat(web/core): 账号卡片显示上次自动续期时间与今日失败次数 | `d60b9537` |
 | v3.11.2 | #107 | 2026-11-10 | docs(deploy): NAS 反复部署的空间维护脚本与清理说明 | `f0ebb42d` |
@@ -130,6 +143,197 @@ flowchart TB
 ```
 
 ## 详细记录
+### 2026-11-11 · v3.17.3（#123） · 修正版本钩子对 CHANGELOG 标题的版本号误判
+
+**问题**：上一条详细记录的标题里把 `v3.17.1` 当叙述写进去了（`复核…补修 v3.17.1 分项开关实时性回归`）。`scripts/version.mjs` 的 `markLatestChangelogTitle()` 用 `/v\d+\.\d+\.\d+/` 检测**整行标题**，把这种「描述里提到旧版本号」误判成「标题已带版本标记」而直接跳过打标，导致该条记录缺少 `v3.17.2（#122）`，`web/tests/version.test.mjs` 的版本接线断言失败（web 185/186）。
+
+**修复**：把检测收紧到标题前缀 —— 只有 `### [日期 ·] vX.Y.Z` 才算已带版本标记，标题其余文字出现旧版本号不再影响打标；同时兼容不带日期的旧格式标题。补 `web/tests/version.test.mjs` 一组断言（描述含旧版本号仍能打标、已发布记录不被改动、已打标 / 旧格式不重复打标），并把上一条标题规范成正式的 `v3.17.2（#122）` 格式。
+
+**验证**：core **522/522**、web **187/187**（+1）、`pnpm lint` 全仓 0 问题、core `tsc --noEmit`、`vue-tsc -b`、`vite build` 全过。服务器 / NAS 环境配置未改动。
+
+### 2026-11-11 · v3.17.2（#122） · 复核运行完整性：补修上次收口引入的分项开关实时性回归，两次同步缺陷 33 项对账 0 缺失
+
+**背景**：用户再次确认「前两次同步带来的 BUG 都修完了吗、现在运行完全没问题了吗」。以当前 HEAD `794fcc39`（v3.17.1）为基线，复跑全量验证、对 33 个既存修复点静态对账（0 缺失），并对之后两笔新改动（v3.17.0 稀有度徽章、v3.17.1 收口二次开关判断）做独立只读审查，发现 v3.17.1 自身引入 1 处确定性回归。
+
+**问题**：`checkFriends()` 的 `effectiveXxx` 是进轮时的快照；`visitFriend()` 删掉内层 `isAutomationOn` 之后，调度层只补了三分项 OR 的 `hasLiveFriendOp()`，只挡得住「三项全关」。运行中单独关掉 `friend_steal`（`friend_help` 仍开着）时 `canContinue()` 继续放行，后续好友仍以快照的 `allowSteal=true` 被带进农场偷菜，`waitStealGap()` 也按快照继续等待。改动前由被调方每位好友实时读开关可以挡住，属于收口时漏掉的一层实时性。
+
+**修复**（`core/src/services/friend/scheduler.ts`）：
+- 新增 `isLiveFriendOp('help'|'steal'|'bad')`：开头快照决定「本轮是否安排这件事」，运行中按分项实时读 `isAutomationOn`；定向模式由 `onlyXxx` 豁免全局开关，保持「忽略全局、强制只做一件」的语义。
+- 循环开头按实时值算 `liveSteal / liveHelp / liveBad`，目标要做的事全被关掉就跳过（不进农场，也不会因已关闭的捣乱额度误 break 整轮）；`waitStealGap()` 的 `stillWaiting()`、偷菜间隔判断、捣乱额度分支同步改用实时值。
+- `detached` 回调内再次按分项重算 `allowXxx`，覆盖「入队 → 真正执行」之间的时间差。
+- `hasLiveFriendOp()` 保留三分项 OR 不变：它只负责「整轮是否还有事可做」，分项级判断交给 `isLiveFriendOp`。
+
+**回归测试**（`core/tests/friend-visit-options.test.js` +2 项）：静态锁住实时复查贯穿等待 / 循环 / detached 三处、detached 不再用 `effectiveXxx` 快照；抽真实 `isLiveFriendOp` 源码执行，验证「只关偷菜」时 steal 立即 false 而 help/bad 仍 true、三项全关全 false、定向 `onlySteal` 在全局关闭时仍放行、开头未安排的事中途打开不在本轮临时启用。
+
+**验证**：core **522/522**（+2）、web **186/186**、`pnpm lint` 全仓 0 问题、core `tsc --noEmit`、`vue-tsc -b`、`vite build` 全过。服务器 / NAS 环境配置未改动。
+
+**结论边界**：两次上游同步（`158473a2` v3.15.0 / `b0a1f456` v3.16.0）带来的、可静态确认的缺陷仍全部修完（33 项对账 0 缺失）；本次补修的是之后 v3.17.1 自身引入的回归，不是同步遗留。仍有 3 项需服务器跑满一天日志判断的参数验收项：好友 200–350ms 请求密度、`pet-sync` 整轮让路频率、分次种植 × 2×2 命中率。
+
+### 2026-11-11 · v3.17.1（#121） · 收口 visit-strategy 二次开关判断：options 成为单次好友访问的唯一决策来源
+
+**背景**：复核前两次上游同步时列过一项「`visit-strategy.ts` 二次 AND `isAutomationOn` 与 `effectiveXxx` 语义重复」。`checkFriends()` 已把全局开关与本地定向语义算进 `effectiveStealEnabled` / `effectiveHelpEnabled` / `effectiveBadEnabled`，再经 `allowXxx` 传给 `visitFriend()`；被调方却又读一次 `isAutomationOn('friend_steal' / 'friend_bad' / 'friend_help')` 做 AND。这与本地 `onlyHelp` / `onlySteal` / `onlyBad`（忽略全局开关，强制只做一件事）的语义冲突：定向模式会被静默掐回 `false`，`visitFriend` 返回 `no_action`，一个请求、一行日志都不产生。当前三条定向入口都有守卫、`onlySteal` 零调用点，所以不构成可观察缺陷；`git blame` 确认这段来自上游 2026-10-23 提交 `580e3253b`，本地与上游逐字相同，不是前两次同步引入。
+
+**改动**：
+- `core/src/services/friend/visit-strategy.ts`：`visitFriend()` 去掉三处二次 `isAutomationOn`，`allowXxx` 直接成为最终结论；`VisitFriendOptions` 注释明确「options 是唯一决策来源、所有调用点必须显式传齐三个 allowXxx」。经验上限 / 护主犬放行这类调用方没算过的条件仍留在被调方。
+- `core/src/services/friend/scheduler.ts`：把「运行中关掉开关立即生效」的实时性从被调方挪到调度方 —— `checkFriends()` 的 `canContinue()` 新增 `hasLiveFriendOp()`（非定向模式下三个分项开关全关就停，定向模式不受影响）；`runScheduledStealCheck()` 的 12 人访问循环内新增 `!isAutomationOn('friend') || !isAutomationOn('friend_steal')` 实时复查，避免硬编码 `allowSteal: true` 在开关关闭后继续进农场。
+- `core/tests/friend-visit-options.test.js`（新增 4 项）：静态锁 `visitFriend` 不再读分项开关而保留经验上限判断；遍历 `core/src` 锁住所有 `visitFriend()` 调用点都显式传齐 `allowSteal` / `allowHelp` / `allowBad`；锁住两处实时性复查的位置顺序；抽 `effectiveXxx` 真实源码片段执行，验证「`friend_steal` 关着 + `onlySteal` 仍放行」与普通模式完全跟随全局开关。
+
+**验证**：core 520/520（+4）、web 186/186、`pnpm lint` 全仓 0、core `build:ts`、`vue-tsc -b`、`vite build` 全过。服务器 / NAS 环境配置未改动。
+
+### 2026-11-11 · v3.17.0（#120） · 落地上游 PR #125 稀有度徽章（rarityTone），宠物卡片显示四档稀有度
+
+**背景**：上游 PR #125（`7f38536e`）重写 `components/PetPanel.vue` 时新增 `rarityTone()` —— 宠物名旁按稀有度显示彩色药丸徽章（4+ 金 / 3 蓝 / 2 绿 / 其余灰），文案取 `pet.rarityLabel`。本地 v3.16.0 评估时因「会改视觉、留待需求」未落地，只等价落地了 `durationLow` 与 `feedTitle` 两处可用性改进。数据本身早已齐备：`core/src/services/pets.ts` 的 `RARITY_LABELS`（普通 / 稀有 / 珍品 / 天工）与 `web/src/stores/pet.ts` 的 `rarity` / `rarityLabel` 都在，缺的只是显示。
+
+**等价落地（只改 `web/src/views/Pet.vue` 一个文件，后端 / store / 接口零改动）**：
+
+- script 新增 `rarityTone(rarity)` 四档映射；模板两处渲染：顶部「当前守护」宠物名字旁、名册每张宠物卡片名字旁。PC 端徽章紧贴名字，`Lv.X` 仍靠右。
+- 样式新增 `.pet-rarity` 与四个修饰类，配色走本地 `--ui-warning` / `--ui-blue` / `--ui-primary` / `--ui-muted` 及对应 soft 令牌，亮 / 暗模式自动切换；不引入上游的 naive-ui `NTag`，也不恢复 `components/PetPanel.vue`（资本模式三页签结构保留）。
+- 手机端三列窄卡片：徽章放在名字行的内层容器里，现有「手机端隐藏 Lv」的选择器只命中名字行的直接子 span，不会误伤徽章；名字保留 `truncate`，卡片高度不变。
+
+**回归测试**：`web/tests/pet-page-usability.test.mjs` 新增 2 项 —— 把 `rarityTone` 源码抽出来真实执行 `0 / 1 / 2 / 3 / 4 / 99 / NaN` 七种边界值断言四档映射；锁两处模板绑定、`{{ rarityLabel }}` 文案、四档 CSS 与 `--ui-*` 令牌、不引入 `NTag`、以及手机端徽章的结构位置。
+
+**验证**：core **516/516**、web **186/186**（+2）、`pnpm lint` 全仓 0 问题、core `build:ts`、`vue-tsc -b`、`vite build`（30.02s）全过。服务器 / NAS 环境配置未改动。
+
+### 2026-11-11 · v3.16.2（#119） · 复核前两次上游同步：24 项修复逐条对账，补修 3 处漏网缺陷
+
+**复核范围**：`158473a2`（v3.15.0，同步上游 PR #122–#124，35 个文件）与 `b0a1f456`（v3.16.0，同步上游 PR #125 等价落地，4 个文件）两次同步带来的改动，加上其后 v3.15.1–v3.16.1 的全部修复提交。做法是：还原两次同步的文件清单 → 从 CHANGELOG / 工作日志整理「已知 BUG 清单」→ 两路只读源码审查查漏 → 逐条核实代码证据（不轻信审查结论）→ 全量自动化验证 → 24 项静态对账。
+
+**对账结果**：v3.15.0 同步后暴露的 P0 死锁、邮箱时刻非法拖垮整份保存、种植轮闸门缓存失效；v3.16.1 体检的 14 处；v3.16.0 等价落地的宠物页改进及切页签草稿问题 —— 共 24 个关键修复点在当前 HEAD 逐一核对，**0 缺失**。
+
+**本次补修 3 处漏网问题**（均有代码证据，非风格/猜测）：
+
+- `services/friend/scheduler.ts` 的 `runScheduledStealCheck()`：到期成熟名单直接取 `claimDueFriends()`，不查黑名单；而同一函数的校准分支、`checkFriends` 主路径、宠物同步、黄金虫全都过滤黑名单。成熟计划是「访问好友时」写下的，拉黑动作不会回头清除，`claimDueFriends` 还会把到期点推后 5 分钟反复捞出 —— 结果**被拉黑的好友仍被定时偷菜反复进农场**，旧成熟点还会频繁唤醒巡查。新增 `maturity-plan.ts` 的 `dropFriendMaturityPlans(gids)`，巡查开头按黑名单清计划，校准分支复用同一份名单；`friend/index.ts` 同步导出。
+- `controllers/admin/commerce-routes.ts` 的 `friendlyError()`：v3.16.1 给活动错误处理器补了中文化后的「请求等待队列已满」/「请求已中断」，漏了商城路由这个同类消费方。购买请求撞上队列满或连接中断时会被当成普通失败，把网关内部长串中文原文吐给前端，前端也拿不到可分流重试的 `errorCode`。补 `COMMERCE_BUSY` / `COMMERCE_REQUEST_INTERRUPTED` 两类友好分类。
+- `components/settings/AccountFeatureSettings.vue` 的 `finish()`：fire-and-forget `emit('save', ..., true)` 之后无条件关闭弹窗并清空 `editSnapshot`。一旦邮箱时刻留了非法草稿、前置校验拦下请求，弹窗已经关掉，非法草稿残留在模型里，之后**所有**保存入口（含拨卡片开关的静默保存）都会被同一条校验堵死，连「取消回滚」也没了；显式「保存并关闭」还被误标成静默保存，成功时无反馈。改为：emit 增加可选 `done` 回执、`Settings.vue` 的 `handleFeatureModuleSave` 返回 `Promise<boolean>` 并由包装函数统一回执（含异常兜底），只有成功才关闭弹窗；显式保存传 `quiet=false`；静默保存遇到非法草稿不再整批拦截，由 store 兜底剔除该字段、其余照常保存并在成功后回填修正草稿。
+
+**一条审查结论经核实后撤回**：`utils/low-priority-gate.ts` 的 `isGatewayYieldError()` 未识别 pending 阶段「已发往网关但未回包」的超时。审查认为是漏判，但 `git blame` 显示 `8363558f`（v3.13.0 日志中文化）**刻意**加了相反断言，且 `worker.ts:295` 的统一调度已用 `isGatewayHealthyForBusiness()` 对网关静默做整轮退避。改它反而会把偶发超时升级成 30 分钟冷却、破坏既定设计，故保持原样。
+
+**验证**：core **516/516**（+2：拉黑计划清理的真实行为 + 接线静态锁）、web **184/184**（+1：保存并关闭回执链路）、`pnpm lint` 全仓 0 问题、core `build:ts`、`vue-tsc -b`、`vite build` 全过；另扩展 `activity-error-classification.test.js` 的静态锁，把商城路由纳入中文关键字一致性检查。
+
+**结论与边界**：两次同步带来的、能静态确认的缺陷已全部修完，自动化验证全绿。但「运行完全没问题」不能靠代码审查打包票 —— 仍有 3 项必须在服务器上跑满一天日志才能判断（好友 200–350ms 请求密度、`pet-sync` 整轮让路的触发频率、分次种植 × 2×2 命中率），另有上游 `rarityTone` 稀有度徽章未落地、`visit-strategy.ts` 二次开关判断与 `effectiveXxx` 语义重复（当前调用点都有守卫，不构成缺陷），均非本次改动引入。服务器 / NAS 环境配置未改动。
+
+### 2026-11-10 · v3.16.1（#118） · 全仓完整性体检：修复 14 处逻辑缺陷并补齐回归测试
+
+对 core / web 全仓做了一次完整体检（自动化验证 + 三路源码审查 + 逐条核实证据），只修确认能造成运行错误的问题，不碰服务器 / NAS 环境配置。
+
+**一、配置与界面接线（用户可见的功能丢失）**
+
+- `web/src/components/settings/AccountFeatureSettings.vue`：「日常与活动」模块被 PR #122 手工合并新增的 `v-else-if="activeModule === 'activity'"`（只有「每日邮箱奖励」一个输入框）顶掉，末尾 `v-else` 里的日常任务 / 节令小札 / 快乐不独享 / 收藏图鉴 / 奶茶店全部开关变成**永远不可达的死代码**。把邮箱 section 并入同一个 activity 分支，七个模块键全部可达。
+- `goldenBugKeepCount` / `goldenBugRoundLimit`（黄金虫保留数量、单轮上限）：UI 有输入框，但 `setting.ts` 的 `SettingsState` / `createDefaultSettings` / `applyFetchedSettings` / `SAVEABLE_SETTINGS_KEYS`、`Settings.vue` 的 `localAutomationSettings` 与 `syncLocalAutomationSettings`、`data-provider.ts` 的 `saveSettings` 白名单、`account-config.ts` 的 `getConfigSnapshot` / `applyConfigSnapshot`、`shared-state.ts` 的 `DEFAULT_ACCOUNT_CONFIG` / `cloneAccountConfig` / `normalizeAccountConfig`、`types/config.ts` 全都没有这两个键 —— 填了不保存、刷新就回默认。现已全链路接通并做 0–10000 / 1–100 的 clamp。
+- `GET /api/settings` 没有下发 `emailClaimHour`（只有保存接口回传），刷新页面后邮箱时刻输入框会退回默认 10 点。连同两个黄金虫字段一起补齐下发。
+
+**二、调度与状态机（会漏跑 / 重复跑 / 卡死）**
+
+- `farm/reservation-window.ts` 的 `hasExpiredWindow()` 是纯读：一个过期窗口若在后续轮次没走到 `evaluate()`（凑齐布局 / 没种子 / 不再预留），就永远留在 `active`，把 30 秒整轮节流**永久击穿**，每轮巡田都重跑背包与商店策略。改为带副作用推进（记录 `activeOccupants`，过期时按原占用者写入 `released` 并清 `active`）；`isNewPlantingCycle()` 补「占用者全部消失也算新周期」，让释放态能自愈。
+- `core/worker.ts` 的 `applyRuntimeConfig()`：同一个 `__revision` 的补充下发（好友黑名单 / 已知 GID 同步）带新内容但版本号没变，却每次都执行整套「保存后重排」副作用。新增 `freshRevision` 判断，只在新版本号或 `rev=0` 的面板开关下发时重排；`resetUnifiedSchedule({ preserveSteal: true })` 让配置下发不再把偷菜的**成熟时刻排程**打回 5–15 秒随机窗口（首次启动仍全量重置）。
+- `friend/scheduler.ts` 的 `runScheduledStealCheck()` 被帮忙巡查的 `isCheckingFriends` 顶掉时返回写死 60 秒，覆盖 `getNextStealDelayMs()` 算出的作物成熟时刻，成熟窗口必被跳过；改为按成熟计划重新唤醒。
+- `farm/scheduler.ts` 的 `refreshFarmCheckLoop()` 把分次种植 `farm_plant_continue` 的「配置间隔 − 已耗时」压成 200ms，且手动 `clear` 后若守卫不通过会丢掉续跑；改由 `getRemainingPlantDelayMs()` 决定，且不再先 clear（同名 `setTimeoutTask` 内部会清）。
+- `worker.ts` 的 `runFarmTick()` finally 缺 `runtimeGeneration` 守卫，停机 300ms 内重启时旧轮次会覆盖新会话排程；`stopUnifiedScheduler()` 补齐退避 / 让路 / `nextStealDelayMs` 复位。
+- `automation-lock.ts`：持锁上下文内 `taskFn` 同步抛错时 `Promise.resolve(taskFn())` 会同步 throw，调用方的 `.catch(() => null)` 接不住；改为 `Promise.resolve().then(taskFn)`。
+- `farm/planting.ts` 的 `resetPlantingRoundState()` 漏了 `resetRegisteredLayouts()` 且生产链路没有调用点；补齐并在 `quiesceBot()` 里停机复位全部 2×2 跨轮状态。
+
+**三、日志中文关键字与邮箱状态**
+
+- `activity-center/error-handler.ts` 判断「请求队列已满」「请求被中断」，而网关实际抛的是「请求**等待**队列已满」「请求**已**中断」，`ACTIVITY_BUSY` / `ACTIVITY_REQUEST_INTERRUPTED` 两个分类永远不命中；兼容修正。`utils.ts` 的 `isTransientGatewaySkip()` 清理中文化前的死关键字，补上「总量额度用尽 / 单方法额度用尽」。
+- `services/email.ts` 的 `markAttempted()` 写盘失败时仍把 `attemptedDateKey` 留在今天，`isDoneToday()` 整天为真，存储恢复后本进程**再也不会补跑**当天邮箱检查；改为回滚当天标记。`finishAttempt()` 静默吞掉写盘失败（磁盘残留 `running`、内存显示完成）改为显式记录存储故障并写日志。
+
+**四、前端草稿与交互**
+
+- `views/Pet.vue` 的 `watch([currentAccountId, tab], load)` 让任何页签切换都重新拉数据并覆盖「资本模式」未保存草稿；改为切账号 / 首次进入 / 手动刷新才同步，切到日志页只单独补拉日志。
+- `views/Settings.vue` 对整个 `settings` 做 deep watch，保存任意功能模块设置都会把「下线提醒」页未保存草稿冲掉；监听源收窄到 `offlineReminder`。同时接住 `AccountFeatureSettings` 的 `emit('save', key, true)` 静默参数，拨卡片开关不再每次弹「已保存」模态框。
+
+**验证**：core **514/514**、web **183/183**、`pnpm lint` 全仓 0 问题、core `build:ts`、`vue-tsc -b`、`vite build`（25.65s）全过。新增 `core/tests/activity-error-classification.test.js`、`core/tests/unified-scheduler-regressions.test.js`、`web/tests/settings-integrity.test.mjs`，并给 `email-daily-persistence` / `reservation-window` / `automation-lock` 三组测试补了失败路径与回归断言。
+
+### 2026-11-10 · v3.16.0（#117） · 同步上游 20261110（PR #125）评估：不采纳组件重写，等价落地宠物页两处可用性改进
+
+**上游范围**：`b9375ec..47fa669b`，3 个提交（`7f38536e` 实现 + merge/sync），**只改 1 个文件** —— `web/src/components/PetPanel.vue`（+715 / -572），PR #125「优化宠物页面布局与移动端图标对齐」。
+
+**评估结论：组件重写整体不采纳**。本地在 `4dacc149`（宠物小屋恢复资本模式）里已刻意删除 `components/PetPanel.vue`，改用自研的 `web/src/views/Pet.vue`（650 行，含「宠物管理 / 守护记录 / 资本模式」三页签、`BaseButton` + UnoCSS + `--theme-*` 变量）。上游新版依赖 naive-ui 的 `NButton` 插槽、`--ui-*` 变量与容器查询，且没有资本模式；原样取回会抹掉本地核心特性与 UI 体系。
+
+**逐项核对上游新增点**：
+
+| 上游改动 | 本地情况 | 处理 |
+| --- | --- | --- |
+| `ownedCount`（已获得 X/Y 只宠物） | `views/Pet.vue` 早已有同名 computed 与「已拥有 X / Y」 | 已具备，无需改 |
+| `rarityTone` 稀有度徽章（金/蓝/绿/灰） | 本地宠物卡片只显示等级，没有稀有度标签位 | 未落地（会改视觉，留待需求） |
+| 移动端图标对齐 | 上游修的是 `:deep(.n-button__icon)` 在窄屏的对齐；本地页签用 `flex items-center gap-1.5`，本就对齐，`BaseButton` 无该插槽 | 无此问题，不照搬 |
+| 工具栏 / 看家状态 / 宠物名册整体重排 | 本地是双栏 `pet-workspace` + 独立页签结构 | 不采纳 |
+| **狗粮不足 1 天预警 `durationLow`** | 本地只有进度条，没有低量提示 | **等价落地** |
+| **喂食按钮禁用原因 `feedTitle`** | 本地按钮灰着但无解释 | **等价落地** |
+
+**等价落地（落到本地组件，不动上游文件）**：
+
+- `web/src/views/Pet.vue`：新增 `durationLow`（`!!deployed && remainSeconds < 86400`），守护时长数字与进度条在不足 1 天时转红，并在进度条下加一行「守护剩余不足 1 天，建议补充狗粮」；新增 `feedTitle(food)`，按「库存为 0 / 正在喂食 / 份数非法 / 可喂食 N 份」四种情况给出按钮 `title`。
+- `web/src/components/ui/BaseButton.vue`：新增可选 `title?: string` prop，并在普通按钮与 `RouterLink` 两条分支都绑定 `:title="title"`（不靠 attrs 隐式透传，确保提示真能显示）。
+- 新增 `web/tests/pet-page-usability.test.mjs` 4 项：锁住「本地仍是 `views/Pet.vue`、不得重新引入 `PetPanel.vue`」这一决策；断言 `durationLow` 判定与两处变色绑定、低量提示位置；断言 `feedTitle` 四条文案与模板绑定；断言 `BaseButton` 的 `title` prop 与两处绑定。
+
+**保留的本地特性自查**：资本模式页签 / `capitalDraft` / `saveCapitalSettings`、双栏 `pet-workspace`、`farm-page-tabs`、`BaseButton` 体系、2×2 预留窗口、种植轮闸门、preflight 续期账本、全量中文日志均未受影响。
+
+**验证**：core **500/500**、web **179/179**（+4）、`pnpm lint` 全仓 0 问题、core `build:ts`、`vue-tsc -b`、`vite build`（25.29s）全过；另核对构建产物，确认 `i-carbon-warning-alt` / `bg-red-500` / `text-red-600` / 两个 dark 变体均生成，新文案已进 `Pet-*.js`。
+
+### 2026-11-10 · v3.15.6（#116） · 补齐 tests 与样式文件的检查范围，格式化后 web 全仓 lint 清零
+
+- **问题（检查机制本身有盲区）**：`web` 的 lint 脚本写的是 `eslint "src/**/*.{ts,vue}" --fix`，于是 `src/styles/*.css` 与整个 `tests/` 从来没被检查过。手动跑一次全量才发现堆了 **654 个问题**（650 error）：`src/styles/milk-tea-workbench.css` 一个文件 604（全部是 prettier 要求的「每行一条声明」，而该文件通篇用紧凑单行写法）、`tests/` 38、`index.html` 7、`public/activity/milk-tea/assets.json` 1（缺末尾换行）、`MilkTeaExchangePanel.vue` 4。范围外的文件只会越积越多，等于没在检查。
+- **工具链调整**：`web` 的 `lint` 改成 `eslint src tests --max-warnings=0`（覆盖业务代码 + 测试 + 样式，不扫 `public` 里的静态资源大 JSON），另外新增 `lint:fix`；`core` 的 `lint` 去掉 `--fix`（全量自动修复会顺手改无关文件，之前踩过），另设 `lint:fix`；根 `package.json` 补上原先缺失的 `test` / `test:core` / `test:web` 与 `lint:fix`，`pnpm test` 不再报错。
+- **ESLint 配置贴合实际**：`web/eslint.config.js` 加一段 `tests/**` 的 overrides —— `test/no-import-node-test` 关掉（本仓库单测统一用 `node:test` 配 `node --test`，不接 vitest），`no-new-func` 关掉（测试靠 `new Function` / `ts.transpileModule` 把 TS 源码跑起来做静态断言，这里没有代码注入面）。
+- **格式化**：`milk-tea-workbench.css` 按 prettier 展开成一条一声明（746 行 → 3118 行）。为确认没有改到实际样式，把格式化前后的文件都去掉注释、空白、引号与小数写法差异后逐字符比对 —— 两边 token 长度同为 **47325** 且完全相同，等于**只动了空白与 `"x"` → `'x'`、`.5` → `0.5` 这类等价写法**。tests 里的 `max-statements-per-line` 手工拆行（12 处，像 `const a = f(); reply(); await a` 拆成三行）；`credential-status.test.mjs` 的 `NOW` 常量提到 `account()` 之前（原来函数先引用后定义，靠调用时机侥幸不炸）。
+- **验证**：`pnpm lint` 全仓 **0 问题**（core + web）；`pnpm test` core **500/500**、web **175/175**；`vue-tsc -b`、`vite build`（22.54s）通过。
+### 2026-11-10 · v3.15.5（#115） · 种植轮闸门缓存失效判断修正 + 清理死代码 + core 全量 lint 清零
+
+- **问题（唯一的逻辑缺陷）**：`farm/planting.ts` 调用 `plantingRoundGate.commit(roundSignature, {...})` 时传的是手写字面量，其中 `plantedLandIds` 恒为空数组。而 `reservation-window.ts` 的 `commit` 里有一条保护 ——「本轮真的种了东西就不缓存」（`planted > 0` 就 `last = null`）—— 从这条调用永远进不去；上一行注释写的正是这个意图，代码与注释对不上。后果是种完一轮后仍把「本轮无事可做」缓存满 `PLANTING_ROUND_RECHECK_MS = 30 秒`。多数情况下土地状态签名会因新植株变化而自动绕开缓存，但只要调用方复用了同一份土地快照（签名没变），剩余空地就要等下一次 30 秒复检 —— 正是之前怀疑的「2×2 已预留但迟迟没种」。
+- **修法**：一行，改成 `plantingRoundGate.commit(roundSignature, result)` 透传本轮真实结果。`commit` 内部按 `plantedLandIds.length > 0` 决定是否作废缓存；`cached` 命中的也变成真实结果对象（而不是被抹空的字面量），`deferredLandIds` 等信息不再丢。
+- **防回归**：`core/tests/planting-log-throttle.test.js` 加两条断言 —— 调用必须是 `commit(roundSignature, result)`，且不得再出现 `commit(roundSignature, {` 这种手写字面量。
+- **死代码（四处）**：`utils.ts` 的 `msg.includes('reason=queue_full')` 删掉 —— 全仓只有这一处提到 `queue_full`，`budget.reason` 的实际取值是 `budget_total` / `budget_method` / `foreground` / `critical` / `ok`，这条兜底从写下来那天起就不成立，只会在排查时误导；`friend/golden-bug.ts` 未使用的 `getAutomation`、`mall-coupon-gift.ts` 未使用的 `isAutomationOn` / `logWarn` 一并从 require 里摘掉；`web/src/stores/status.ts` 的 `nextAt?: number` 删掉 —— 后端会下发，但全前端没有任何地方读它，真要显示「下次检查的绝对时间」时再加回来。
+- **core 全量 lint 清零（11 error + 1 warning → 0）**：`golden-bug.ts` / `friend/index.ts` 的导出顺序（自动修正，纯重排，re-export 语义不变）；`mall-coupon-gift.ts` 的 `getCouponGiftPurchase` jsdoc 补全三个 `@param`（原来只写了 `balance`）；`milk-tea-legacy.ts` 的 `[A-Za-z0-9_]` 改 `\w`（JS 里完全等价）；控制字符剥离 `/[\x00-\x1f\x7f]/g` 改 `/\p{Cc}/gu`（Unicode 控制类，含 C0 与 C1，比手写区间更彻底，也避开 `no-control-regex`）；`qq-credential.ts` 的 `UNSUPPORTED_CODES` 与 `weather-activity.ts` 两条标题匹配正则把无用捕获组改成非捕获组。
+- **验证**：core **500/500**、web **175/175**，core 全量 `eslint .` 0 问题、`tsc` 编译通过。
+### 2026-11-10 · v3.15.3（#113） · 邮箱时刻输入非法不再拖垮整份设置保存 · 两份 hour-of-day 加一致性测试
+
+- **问题**：`HourInput` 故意保留非法草稿（把输入框清空后模型里是空串 `''`，填 `25` 就是 `'25'`），而后端 `applyConfigSnapshot` / `setAccountConfigSnapshot` 对 `emailClaimHour` 是硬校验 —— `assertEmailClaimHour` 直接抛 `INVALID_CONFIG`，`/api/settings/save` 整份请求失败。也就是说用户在「日常与活动」里手滑清空这个框，同一批改的开关、延迟、策略全部一起白改，报错信息还只显示后端的 400 文案，指不到具体字段。
+- **修复一（主）**：`web/src/views/Settings.vue` 的 `handleFeatureModuleSave` 在发出请求前用 `parseHourOfDay` 校验一次。非法就 `showAlert('「自动邮箱领取」时间需填写 0–23 的整数（时），改好后请再点一次保存。', 'danger')` 并直接中止，一个字节都不发；合法草稿（比如字符串 `'10'`）归一成数字写回 `payload.emailClaimHour` 再发，避免把 `'10'` 这种形态传给后端。
+- **修复二（兜底）**：`web/src/stores/setting.ts` 的 `saveSettings` 在按白名单构造 payload 后同样校验一次：非法值就地 `delete`，其它字段照常保存；如果整份 payload 只剩这一个非法字段，直接返回「自动邮箱领取时间需为 0–23 的整数（时）」而不打接口。这样以后新增的保存入口即使漏了校验，最差也只是丢掉这一个字段，不会让整批设置一起失败。
+- **修复三（一致性）**：`hour-of-day` 在 core 与 web 各有一份 `parseHourOfDay`，改一边忘另一边就会出现「前端标红拒绝、后端却收下」。新增 `core/tests/hour-of-day-parity.test.js` 4 项：43 个输入（0–23、前导零、越界、小数、空格/中文后缀/科学计数等脏字符串、`null`/`undefined`/`[]`/`{}`/`NaN`/`Infinity`）两份实现判定必须完全一致；接受集合逐条钉死（午夜 `0` 不能被当成假值丢掉）；两份源码去掉空白与分号后的函数骨架必须相同（防止某一边悄悄长出新分支）；`assertEmailClaimHour` 只在 core 存在、非法值抛 `INVALID_CONFIG` 且提示里带 `0–23`。
+- **防回归**：`web/tests/email-settings.test.mjs` +2 —— 空串场景下 `{ emailClaimHour: '', intervals: {...} }` 只丢掉前者、其它字段照发；`'10'` 按数字 `10` 发出；只带 `25` 时不发请求并返回可读错误。另一项静态断言 `Settings.vue` 的校验确实排在 `settingStore.saveSettings(...)` 之前。
+- **验证**：core **500/500**（+4）、web **175/175**（+2），改动文件 ESLint、`vue-tsc -b`、`vite build`（32.20s）全过。
+### 2026-11-10 · v3.15.2（#112） · 修复好友 tick 与自动化锁互相等死导致整机自动化停摆
+
+- **现象**：v3.15.0 同步上游后，登录十几秒内好友 tick 第一次跑起来就再也不返回。`friendTaskRunning` 一直是 true，`automation-lock` 的全局队列被那条永远不结算的任务占住，紧接着 `farm_tick` 也排不进来 —— 表现是「农场不收、好友不帮、偷菜不动」，只有重启容器才恢复。
+- **根因**：上游 PR #122 把 `checkFriends` 里的取好友列表、单次进农场、偷完出售三处改成 `runExclusiveAutomationTask(..., { detached: true })` 独立入队，本意是「等待间隔时不占锁」。但本仓库的 `runUnifiedTick` 仍然把 `runFriendTick` 整个包在一层 `runExclusiveAutomationTask('friend_tick', ...)` 里（同步前没有 detached 调用，包着没问题）。两层一叠加，detached 子任务会排到「正在 await 它的外层任务」后面，队列等外层结束、外层等子任务返回 —— 死锁。已用最小复现脚本确认：持锁任务内 `await` 一个 detached 子任务，5 秒超时都不返回。
+- **修复一（主）**：`runUnifiedTick` 里好友与偷菜 tick 改回上游写法 `void runFriendTick(auto)` / `void runStealTick(auto)`，不再套自动化锁，由 `checkFriends` 内部的单次访问分别入队；农场 tick 仍保持 `await runExclusiveAutomationTask('farm_tick', ...)` 串行。`friendCheckLoop` 与 `runScheduledStealCheck` 早就是同一口径（后者直接调 `visitFriend`、不经过 detached）。
+- **修复二（兜底）**：`automation-lock` 增加一条硬约束 —— 只要当前上下文**确实持有**锁（`store.active`），detached 调用也一律就地执行。detached 的唯一用途是「定时器继承了已结束任务的上下文（`active=false`）需要重新排队」，不该成为重入逃生门；这样即使以后又有人把 tick 包进锁里，最差只是少让一次锁，不会整机卡死。
+- **修复三（顺带）**：`stopUnifiedScheduler` 之前只复位 `farmTaskRunning` / `friendTaskRunning`，漏了 `stealTaskRunning`。停调度时若有偷菜任务在飞，它的 `finally` 因代次已变不会复位，重启后这个标记永远为 true，偷菜被自己的守卫永久挡住 —— 补上第三个标记一起清。
+- **防回归**：`core/tests/automation-lock.test.js` +2（持锁任务内 await detached 必须返回；任务结束后定时器发起的 detached 仍然重新排队，用顺序断言确认没有退化成「随便就地跑」）；新增 `core/tests/unified-tick-lock.test.js` 3 项（好友/偷菜 tick 不得出现在 `runExclusiveAutomationTask` 里、农场 tick 必须串行、停调度器三个标记同时复位）。
+- **验证**：core 496/496（+5）、web 173/173，改动文件 ESLint、`tsc` 编译全过。
+
+### 2026-11-10 · v3.15.1（#111） · PC 端账号卡片底部横线与微信卡片对齐 · 手机端显示今日成功次数
+
+- **问题一**：账号管理页 PC 端卡片按 `sm:grid-cols-2` / `xl:grid-cols-3` 排布，微信账号比 QQ 账号多三块内容（凭证状态、免扫码续期标记、续期统计），QQ 卡片自然短一截，底部分隔线和「点击卡片切换当前账号 + 设置 / 编辑 / 删除」这一行就比旁边的微信卡片高出十几到几十像素，一排扫下来参差不齐。
+- **做法**：卡片根节点改为 `flex flex-col`（grid item 默认 stretch，同一行卡片本来就等高），在微信专属信息之后、底部分隔线之前插一段 `hidden sm:block sm:flex-1` 的弹性占位 —— PC 端把剩余高度吃掉、把底部行压到卡片底边，所有卡片的横线落在同一水平线；手机端单列排布不需要对齐，占位直接不渲染，保持原来的紧凑间距。
+- **为什么不用固定 min-height**：微信卡片自己也会因为「续期账本还没有记录」而少一行提示，固定预留高度只对得上内容最全的那张。弹性占位对「QQ 少三块」和「微信少一行」两种情况都成立。
+- **细节**：底部行保留 `sm:mt-4`，最高的那张卡片不会出现横线贴住文字；占位带 `aria-hidden="true"`，读屏不会多读一个空节点。
+- **问题二**：手机端那行只显示「上次自动续期：11 分钟前 · 今日失败 0 次」，「今日成功 N 次」被 `hidden sm:inline` 藏起来只给 PC 看。成功次数恰恰是「后端真的在续期」的直接证据，手机上看不到等于这项统计白做。
+- **做法**：`getWxPreflightSummary` 把成功次数并进两端共用的 `text`（`上次自动续期：11 分钟前 · 今日成功 2 次 · 今日失败 0 次`），删掉只给 PC 用的 `detail` 字段与模板里那个隐藏 span。颜色分级、tooltip 提示、旧版服务字段缺失时整行不渲染的规则全部不变。
+- **防回归**：新增 `web/tests/account-card-layout.test.mjs` 4 项（卡片根节点必须是 flex-col、弹性占位存在且仅在 sm 起生效、占位顺序在续期统计之后且底部行之前、底部行不带平台 `v-if` 并保留原有上间距）；`wx-preflight-summary.test.mjs` 改为断言两端同一份文案、`detail` 已移除、成功次数不再被 `hidden sm:inline` 藏起来。
+- **验证**：web 173/173（+4），改动文件 ESLint、`vue-tsc -b`、`vite build`（25.19s）全过；另核对构建产物 CSS 确认 `.sm\:flex-1` 与 `.sm\:block` 确实落在 `@media(min-width:640px)` 内、`.hidden` 在全局，避免只写了模板却没生成样式。
+- **说明**：纯前端展示调整，后端接口、`preflight-stats.json` 账本与 QQ 账号的运行时行为都没改动。
+
+### 2026-11-10 · v3.15.0（#110） · 同步上游 20261109 更新（PR #122-#124），保留本地 2×2 / 中文化 / 续期账本改动
+
+- **同步来源**：`muyuewang/qq-farm-bot-404` 的 `3b3608c → b9375ec`（采纳 liyangpengs master `022df50b`，含 PR #122 / #123 / #124 共 8 个提交、33 个文件）。
+- **采纳 PR #123 + #124（邮件）· 每日定点检查**：`core/src/services/email.ts` 整体替换为按配置时刻每天检查一次的版本 —— 默认 10 时、可设 0（午夜）；`running` 状态落盘，进程中途退出重启后会重新读邮箱而不是当作已完成；状态文件按账号哈希命名（`email-claim-<sha256>.json`），放 `core/data` 随命名卷持久化。新增 `core/src/utils/hour-of-day.ts`（core / web 双份）做 0–23 整点解析，`account-config.ts` 的写入与 `applyConfigSnapshot` 都加了 `assertEmailClaimHour` 校验，非法值直接报 `INVALID_CONFIG` 而不是悄悄存进去。
+- **邮件时刻的接线点**（上游原版会漏、本次特意确认）：`worker.ts` 的 `applyRuntimeConfig` 每次下发配置都调用 `configureEmailClaim({ hour, accountId })` —— 少了这一步服务拿不到账号与时刻，状态不落盘、会变成每隔一分钟重复请求。`startDailyRoutineTimer` 里加了「当天未出结果且已到点」才补跑的判断，`runDailyRoutines` 改为不带 `force` 调用邮箱（否则每次重连都白请求一次）。
+- **邮件展示**：`DailyOverview.vue` 按 `scheduledHour` 显示「每天 10:00 检查」，区分「正在检查 / 检查失败（今日跳过）/ 部分领取失败（今日跳过）/ 今日已检查（无奖励）」；时间显示优先用后端下发的 `timeZone`，跨时区部署不会显示错位。
+- **采纳 PR #124（性能）· 图片懒加载**：新增 `web/src/directives/lazy-src.ts`，所有列表共用一个 `IntersectionObserver`（`rootMargin: 200px`），图片进入可视区才写 `src`，卸载时立即释放观察器；环境没有 `IntersectionObserver` 时直接赋值兜底。接入图鉴、变异图鉴、收藏、配置管理、图鉴主面板共 8 个组件，同时补 `decoding="async"`。
+- **采纳 PR #122 · 延迟真正生效并释放等待锁**：`planting.ts` 贯通 `PlantingPacing`（跨背包 / 商店 / 不同种子共用同一个上次种植时间），到点才发下一个 `Plant` 请求，没到点就把剩余地留给下一轮；商店买到但没种完的种子记在 `pacing.shopSeed` 里，下一轮先用背包余量、不重复购买。`automation-lock.ts` 增加 `active` 标记与 `detached` 选项 —— 关键点是异步上下文会被定时器继承，旧任务的 store 必须标记失效，否则延迟续跑会被误判成「旧锁重入」而直接跑在锁外。`farm/scheduler.ts` 用 `farmLoopGeneration` + `automaticPlantPacing` 管理续跑，`worker.ts` 的 `runUnifiedTick` 不再让好友 / 偷菜任务阻塞后续 tick，`scheduleUnifiedNextTick` 把正在跑的任务排除出排期、由它们的 `finally` 重新排。
+- **好友侧同批改动**：`checkFriends` 每进一个好友前复核「循环是否被停、是否跨日、账号是否离线」，单次访问用 `detached` 独立入队，偷菜间隔改为逐秒切片等待（等待期间不持锁）；`pet-sync.ts` 去掉「等好友任务空闲最多 10 秒」的轮询，改为直接让路；普通访问间隔 500–800ms → 200–350ms。
+- **与本地实现的适配（上游代码不能照抄的地方）**：
+  - 上游 `checkFriends` 直接读 `isAutomationOn('friend_steal')`，会破坏本地 `onlyHelp` / `onlySteal` / `onlyBad` 的定向语义 —— 本次改用 `effectiveStealEnabled` / `effectiveHelpEnabled` / `effectiveBadEnabled`。
+  - 本地日常轮询是 60 秒（对齐老版），上游测试锁的是 30 秒 —— 测试断言改为适配本地实际值。
+  - 本地 `applyRuntimeConfig` 依赖 `getCapitalMode()`，上游单测的 store mock 没有它 —— 加 `typeof ... === 'function'` 兜底。
+  - 本地已删除 `AutomationSettingsForm.vue`（功能并入 `AccountFeatureSettings.vue`），上游对它的改动不采纳；「自动邮箱领取（时）」改为放在「日常与活动」模块里（该模块本来没有内容区，正好补上），用新版 `HourInput` 组件：支持上下箭头增减、边界循环、非法输入就地标红。
+  - 本地 `planting.ts` 的 2×2 预留窗口、种植轮状态闸门、`force` 语义全部保留，`PlantingPacing` 只做增量接入。
+- **验证**：core 491/491（新增邮件定时 4 份测试：定时触发、跨日重置、中断恢复、部分领取），web 169/169（新增 `hour-of-day`、`lazy-src`、`email-settings`），改动文件 ESLint、core tsc、`vue-tsc -b`、`vite build` 全过；`docker/Dockerfile` 与 `docker-compose.yml` 未受影响。
+- **说明**：`pnpm lint` 全量仍有 4 个历史遗留文件（`mall-coupon-gift.ts`、`milk-tea-legacy.ts`、`qq-credential.ts`、`weather-activity.ts`）的非捕获组 / 未使用变量告警，与本次同步无关，改动文件的 lint 是干净的。
+
 ### 2026-11-10 · v3.13.0（#109） · 网关诊断日志改为中文文案（压力 / 超时 / 心跳 / 让路）
 
 - **需求**：运行日志里出现 `Gateway 请求压力: pending=3, queued=1, active=GetIllustratedListV2#513:12.327675000065938ms,...`，面板上像抓包日志，读不出「哪里堵了、堵了多久」。要求这类日志以后以中文形式显示。

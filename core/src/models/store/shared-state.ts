@@ -5,6 +5,7 @@ const { DEFAULT_TIME_ZONE, normalizeTimeZone, resolveClientVersion } = require('
 const { getDataFile, ensureDataDir } = require('../../config/runtime-paths');
 const { createConfigStorage } = require('./config-storage');
 const { storageError } = require('../../services/json-db');
+const { parseHourOfDay } = require('../../utils/hour-of-day');
 
 const STORE_FILE: string = getDataFile('store.json');
 const ACCOUNTS_FILE: string = getDataFile('accounts.json');
@@ -212,6 +213,9 @@ const DEFAULT_ACCOUNT_CONFIG: AccountConfig = {
     fertilizerBuyNormalCount: 1,
     fertilizerBuyNormalThresholdHours: 10,
     fertilizerBuyCheckIntervalMinutes: 60,
+    emailClaimHour: 10,
+    goldenBugKeepCount: 0,
+    goldenBugRoundLimit: 24,
     bagSeedPriority: [],
     bagSeedMultiLandReservationEnabled: false,
     bagSeedLandTypes: {},
@@ -267,6 +271,10 @@ function normalizeFriendsListCacheTtlSec(input: unknown, fallback: number = DEFA
     const value = Number.parseInt(input as string, 10);
     const base = Number.isFinite(value) ? value : fallback;
     return Math.max(10, Math.min(INTERVAL_MAX_SEC, base));
+}
+
+function normalizeEmailClaimHour(input: unknown, fallback: number = DEFAULT_ACCOUNT_CONFIG.emailClaimHour): number {
+    return parseHourOfDay(input) ?? parseHourOfDay(fallback) ?? DEFAULT_ACCOUNT_CONFIG.emailClaimHour;
 }
 
 function normalizeAutoAcceptFriendMinLevel(input: unknown, fallback: number = 0): number {
@@ -455,6 +463,9 @@ function cloneAccountConfig(base: Partial<AccountConfig> = DEFAULT_ACCOUNT_CONFI
         fertilizerBuyNormalCount: Math.max(0, Math.min(10000, Number(base.fertilizerBuyNormalCount) || 0)),
         fertilizerBuyNormalThresholdHours: Math.max(0, Math.min(990, Number(base.fertilizerBuyNormalThresholdHours) || 0)),
         fertilizerBuyCheckIntervalMinutes: Math.max(1, Math.min(1440, Number(base.fertilizerBuyCheckIntervalMinutes) || 30)),
+        emailClaimHour: normalizeEmailClaimHour(base.emailClaimHour, DEFAULT_ACCOUNT_CONFIG.emailClaimHour),
+        goldenBugKeepCount: Math.max(0, Math.min(10000, Math.floor(Number(base.goldenBugKeepCount) || 0))),
+        goldenBugRoundLimit: Math.max(1, Math.min(100, Math.floor(Number(base.goldenBugRoundLimit) || DEFAULT_ACCOUNT_CONFIG.goldenBugRoundLimit))),
         bagSeedPriority: normalizeBagSeedPriority(base.bagSeedPriority),
         bagSeedMultiLandReservationEnabled: base.bagSeedMultiLandReservationEnabled !== undefined
             ? !!base.bagSeedMultiLandReservationEnabled
@@ -564,7 +575,7 @@ function normalizeAccountConfig(input: unknown, fallback: AccountConfig = accoun
     }
 
     if (src.stealDelaySeconds !== undefined && src.stealDelaySeconds !== null) {
-        cfg.stealDelaySeconds = Math.max(0, Math.min(300, Number.parseInt(src.stealDelaySeconds, 10) || 0));
+        cfg.stealDelaySeconds = Math.max(0, Math.min(300, Number(src.stealDelaySeconds) || 0));
     }
 
     if (src.plantOrderRandom !== undefined && src.plantOrderRandom !== null) {
@@ -593,6 +604,18 @@ function normalizeAccountConfig(input: unknown, fallback: AccountConfig = accoun
 
     if (src.fertilizerBuyCheckIntervalMinutes !== undefined && src.fertilizerBuyCheckIntervalMinutes !== null) {
         cfg.fertilizerBuyCheckIntervalMinutes = Math.max(1, Math.min(1440, Number(src.fertilizerBuyCheckIntervalMinutes) || 30));
+    }
+
+    if (src.emailClaimHour !== undefined && src.emailClaimHour !== null) {
+        cfg.emailClaimHour = normalizeEmailClaimHour(src.emailClaimHour, cfg.emailClaimHour);
+    }
+
+    if (src.goldenBugKeepCount !== undefined && src.goldenBugKeepCount !== null) {
+        cfg.goldenBugKeepCount = Math.max(0, Math.min(10000, Math.floor(Number(src.goldenBugKeepCount) || 0)));
+    }
+
+    if (src.goldenBugRoundLimit !== undefined && src.goldenBugRoundLimit !== null) {
+        cfg.goldenBugRoundLimit = Math.max(1, Math.min(100, Math.floor(Number(src.goldenBugRoundLimit) || DEFAULT_ACCOUNT_CONFIG.goldenBugRoundLimit)));
     }
 
     if (src.bagSeedPriority !== undefined && src.bagSeedPriority !== null) {
@@ -790,6 +813,7 @@ module.exports = {
     normalizeKnownFriendGids,
     normalizeKnownFriendGidSyncCooldownSec,
     normalizeFriendsListCacheTtlSec,
+    normalizeEmailClaimHour,
     normalizeBagSeedPriority,
     normalizeBagSeedLandTypes,
     normalizeBagSeedFallbackStrategy,

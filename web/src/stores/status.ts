@@ -26,10 +26,12 @@ interface DailyGift {
   canClaim?: boolean | null
   result?: string
   lastError?: string
+  scheduledHour?: number
 }
 
 interface DailyGiftsResponse {
   date: string
+  timeZone?: string
   growth: DailyGift
   gifts: DailyGift[]
 }

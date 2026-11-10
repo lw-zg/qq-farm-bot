@@ -13,6 +13,7 @@ import BaseSwitch from '@/components/ui/BaseSwitch.vue'
 import { useAccountStore } from '@/stores/account'
 import { useSettingStore } from '@/stores/setting'
 import { useUserStore } from '@/stores/user'
+import { parseHourOfDay } from '@/utils/hour-of-day'
 
 const fertilizerLandTypeOptions = [
   { label: '蓝晶土地', value: 'blue-crystal' },
@@ -260,6 +261,9 @@ const localAutomationSettings = ref({
   fertilizerBuyNormalCount: 10,
   fertilizerBuyNormalThresholdHours: 10,
   fertilizerBuyCheckIntervalMinutes: 30,
+  emailClaimHour: 10 as number | string,
+  goldenBugKeepCount: 0,
+  goldenBugRoundLimit: 24,
   autoAcceptFriendMinLevel: 0,
   autoAcceptRequireOwnLevel: false,
   autoAcceptHarvestStealEnabled: true,
@@ -363,6 +367,9 @@ function syncLocalAutomationSettings() {
     localAutomationSettings.value.fertilizerBuyNormalCount = settings.value.fertilizerBuyNormalCount ?? 10
     localAutomationSettings.value.fertilizerBuyNormalThresholdHours = settings.value.fertilizerBuyNormalThresholdHours ?? 10
     localAutomationSettings.value.fertilizerBuyCheckIntervalMinutes = settings.value.fertilizerBuyCheckIntervalMinutes ?? 30
+    localAutomationSettings.value.emailClaimHour = settings.value.emailClaimHour ?? 10
+    localAutomationSettings.value.goldenBugKeepCount = settings.value.goldenBugKeepCount ?? 0
+    localAutomationSettings.value.goldenBugRoundLimit = settings.value.goldenBugRoundLimit ?? 24
     localAutomationSettings.value.autoAcceptFriendMinLevel = settings.value.autoAcceptFriendMinLevel ?? 0
     localAutomationSettings.value.autoAcceptRequireOwnLevel = settings.value.autoAcceptRequireOwnLevel ?? false
     localAutomationSettings.value.autoAcceptHarvestStealEnabled = settings.value.autoAcceptHarvestStealEnabled ?? true
@@ -374,16 +381,26 @@ function syncLocalAutomationSettings() {
 // ==================== 功能模块（旧版六模块） ====================
 // 功能模块里既改 automation，也改部分策略字段（策略、巡查间隔、静默时段），
 // 所以保存时把两份模型合并成一次请求，避免用户切换标签后改动丢失。
-async function handleFeatureModuleSave() {
+async function handleFeatureModuleSave(_module?: string, quiet?: boolean): Promise<boolean> {
   const accountId = currentAccountId.value
   if (!accountId)
-    return
+    return false
+  // 邮箱时刻只收 0–23 的整点：输入框会保留非法草稿（清空后是空串），
+  // 后端 assertEmailClaimHour 对这份快照是硬校验，抛错会让整批设置一起不生效，
+  // 所以显式保存必须在本地拦住，别发出去。
+  const emailClaimHour = parseHourOfDay(localAutomationSettings.value.emailClaimHour)
+  if (emailClaimHour === null && !quiet) {
+    showAlert('「自动邮箱领取」时间需填写 0–23 的整数（时），改好后请再点一次保存。', 'danger')
+    return false
+  }
   automationSaving.value = true
   try {
     const payload: any = {
       ...JSON.parse(JSON.stringify(localStrategySettings.value)),
       ...JSON.parse(JSON.stringify(localAutomationSettings.value)),
     }
+    // 归一成数字再发；合法草稿可能是字符串 '10'。
+    payload.emailClaimHour = emailClaimHour
     if (payload.automation?.fertilizer_land_types) {
       payload.automation.fertilizer_land_types = normalizeFertilizerLandTypes(payload.automation.fertilizer_land_types)
     }
@@ -393,13 +410,17 @@ async function handleFeatureModuleSave() {
         .map(Number)
         .filter((id: number) => Number.isFinite(id) && id > 0))]
     }
+    // quiet（拨卡片开关）时非法草稿不应把整批开关堵死：这里置成 null，
+    // store 的兜底会就地剔除这一个字段，其余设置照常保存，成功后回填会顺手修正草稿。
     const res = await settingStore.saveSettings(accountId, payload)
     if (accountId !== currentAccountId.value)
-      return
+      return false
     if (res.ok) {
       syncLocalStrategySettings()
       syncLocalAutomationSettings()
-      showAlert('功能模块设置已保存', 'primary')
+      // 卡片开关的 emit('save', key, true) 是静默保存，不该每次拨动都弹模态框。
+      if (!quiet)
+        showAlert('功能模块设置已保存', 'primary')
 
       if (payload.automation?.fertilizer_buy_organic || payload.automation?.fertilizer_buy_normal) {
         try {
@@ -418,18 +439,27 @@ async function handleFeatureModuleSave() {
           console.error('检测购买化肥失败', e)
         }
       }
+      return true
     }
     else {
       const message = res.unconfirmed && res.saved
         ? `设置已保存，但运行进程尚未确认应用：${res.error || '请稍后重试或重启账号'}`
         : `保存失败: ${res.error}`
       showAlert(message, res.unconfirmed && res.saved ? 'primary' : 'danger')
+      return false
     }
   }
   finally {
     if (accountId === currentAccountId.value)
       automationSaving.value = false
   }
+}
+
+// 「保存并关闭」要等结果：校验失败时留在弹窗里让用户就地改，别把编辑上下文销毁。
+function onFeatureModuleSave(module?: string, quiet?: boolean, done?: (ok: boolean) => void): void {
+  handleFeatureModuleSave(module, quiet)
+    .then(ok => done?.(ok))
+    .catch(() => done?.(false))
 }
 
 // ==================== 系统设置 ====================
@@ -572,7 +602,9 @@ function validateDingTalkWebhook(): string {
   return ''
 }
 
-watch(settings, () => {
+// 只监听下线提醒本身：保存功能模块设置会整体更新 settings，
+// 若对整个 store 做 deep watch，会把通知设置页还没保存的草稿冲掉。
+watch(() => settings.value?.offlineReminder, () => {
   syncLocalOfflineSettings()
 }, { deep: true })
 
@@ -896,7 +928,7 @@ async function handleResetSystemConfig() {
             :bag-fallback-strategy-options="BAG_FALLBACK_STRATEGY_OPTIONS"
             :fertilizer-land-type-options="fertilizerLandTypeOptions"
             :fertilizer-options="fertilizerOptions"
-            @save="handleFeatureModuleSave"
+            @save="onFeatureModuleSave"
           />
         </div>
 
