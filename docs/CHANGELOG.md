@@ -10,10 +10,28 @@
 > **跳过数字 4**：版本号三段与更新序号在递增时，只要十进制表示任意位置含 `4` 就继续跳到下一个不含 `4` 的整数（`4 → 5`、`14 → 15`、`39 → 50`）。
 > **全量重排**：全部历史记录已按时间正序重新编号，以 `v3.0.0 · 第 1 次更新` 为起点；此前 `v2.x` / `v2.9.x` 等旧版本序列的对应关系已作废，一律以本表为准。详细记录正文里提到的旧版本号属于当时的叙述，同样已作废。
 > **更新序号**：累计更新次数，每次提交无条件 +1（遇到含 `4` 的序号自动跳过）；所有详细记录都带版本号与更新序号。
-> 版本号由 `version.json` 统一维护，可用 `pnpm version:bump` 手动递增，安装 `pnpm hooks:install` 后每次提交自动递增；提交前手动递增的首条记录没有提交号（显示 `—`），由 hook 自动递增的记录会带上对应提交号。
+> 版本号由 `version.json` 统一维护，可用 `pnpm version:bump` 手动递增，安装 `pnpm hooks:install` 后每次提交自动递增。**版本号与更新内容合并进同一次提交**，不再单独产生 `chore(version)` 提交；因此「提交」列显示 `—` 即代表这次提交自身（早期分批提交的历史记录同样是 `—`）。
+> **提交标题格式**：`vX.Y.Z · 第 N 次更新 · 更新内容`，由 `commit-msg` 钩子自动改写，原始提交说明下沉为正文首行。
 
 | 版本 | 更新序号 | 日期 | 更新内容 | 提交 |
 | --- | --- | --- | --- | --- |
+| v3.22.5 | #152 | 2026-11-12 | 回滚 README 的 Docker 部署命令补全，恢复精简安装说明 | — |
+| v3.22.3 | #151 | 2026-11-12 | 补全 README 的 Docker 部署命令集 | — |
+| v3.22.2 | #150 | 2026-11-12 | 精简 README 的 Docker 部署章节，只保留正常安装说明 | — |
+| v3.22.1 | #139 | 2026-11-12 | 金豆今日数值改由后端同源统计，移除浏览器本地基线 | — |
+| v3.22.0 | #138 | 2026-11-12 | 新增今日统计的金豆与点券今日数值卡片 | — |
+| v3.21.0 | #137 | 2026-11-11 | 新增一键更新 / 一键清理 / 一键重构三条固定流水线 | — |
+| v3.20.2 | #136 | 2026-11-11 | README 的「Docker 部署」只留通用步骤，删掉某台机器的实测数据 | — |
+| v3.20.1 | #135 | 2026-11-11 | 修掉 `--scan-volume` 下「让你再跑一遍自己」的自相矛盾提示 | — |
+| v3.20.0 | #133 | 2026-11-11 | 新增 `--scan-volume`：把「Docker 之外那 27G」自动摊开，查出来是 fnOS 的 `@appmeta` / `@sysappmeta` | — |
+| v3.19.1 | #132 | 2026-11-11 | 磁盘对账汇总补上 `-x`：15G 虚报其实是 9.3G，另有 5.7G 是 overlay 视图重复算的 | — |
+| v3.19.0 | #131 | 2026-11-11 | NAS 空间诊断新增磁盘对账与健康检查明细，探针不再依赖 wget | — |
+| v3.18.0 | #130 | 2026-11-11 | `--report` 改为全量诊断并新增 `--prune-orphans`，纠正「构建缓存占大头」的误判 | — |
+| v3.17.9 | #129 | 2026-11-11 | 修复 NAS 反复构建后空间清不干净：`builder prune` 补上 `-a`，日志加体积上限 | — |
+| v3.17.8 | #128 | 2026-11-11 | 提交标题改为「版本号 · 第 N 次更新 · 更新内容」，原始说明下沉为正文 | — |
+| v3.17.7 | #127 | 2026-11-11 | 修正钩子文件可执行位，Linux/macOS 上版本递增才会真正执行 | — |
+| v3.17.6 | #126 | 2026-11-11 | 版本号与更新内容合并为同一条提交，不再单独产生 chore(version) 记录 | — |
+| v3.17.5 | #125 | 2026-11-11 | chore(deploy): NAS 部署脚本构建缓存回收窗口由 24 小时收紧到 1 分钟 | `ce55f8b1` |
 | v3.17.3 | #123 | 2026-11-11 | fix(version): 修正 CHANGELOG 标题版本号误判，补上 hook 回归测试 | `f22b21b8` |
 | v3.17.2 | #122 | 2026-11-11 | fix(core): 复核运行完整性，补修 v3.17.1 分项开关实时性回归 | `c4a1640f` |
 | v3.17.1 | #121 | 2026-11-11 | fix(core): 收口 visit-strategy 二次开关判断，options 成为单次好友访问唯一决策来源 | `1a1be415` |
@@ -143,6 +161,294 @@ flowchart TB
 ```
 
 ## 详细记录
+### 2026-11-12 · v3.22.5（#152） · 回滚 README 的 Docker 部署命令补全，恢复精简安装说明
+
+应要求撤销上一次更新（v3.22.3 · #151）的内容改动。
+
+- **还原范围**：`README.md` 的「Docker 部署」章节回到 33 行精简版（环境要求 → clone / `up -d --build` → 访问地址与首次登录 → 端口、数据卷、日志卷表格 → `ps` / `logs -f` / `down` 三条基础命令 → 「不要 `down -v`」提示 → NapCat 与详细参考链接）；`web/tests/nas-deploy.test.mjs` 的 README 断言同步回到「章节小于 40 行、不得出现脚本名与运维关键词、不得出现备份命令示例、必须含完整安装步骤」的锁。两个文件与 v3.22.2 逐字节一致。
+- **不还原的部分**：版本号与更新序号只增不减，本次照常递增；`docs/CHANGELOG.md` 里 v3.22.3 的历史条目保留（变更历史不抹掉），由本条说明它已回滚。
+- **其他内容不动**：`scripts/nas-deploy.sh` 的三条流水线、首页今日统计、后端统计、其他视图与测试全部保持原样。
+- **回滚方式**：生成新的回滚提交，不改写已推送的远程历史。`git pull --ff-only` 与一键更新脚本都能正常快进，不会因强推造成本地与远程分叉。
+
+### 2026-11-12 · v3.22.3（#151） · 补全 README 的 Docker 部署命令集
+
+上一版为了「只保留正常安装」把 Docker 章节从 88 行压到 31 行，连部署命令也一起砍薄了，只剩 `git clone` / `up -d --build` / `ps` / `logs -f` / `down` 六行。实际照着部署会缺配置、验证、更新、重启和备份的命令，属于精简过头。这一版把命令补成一套可直接复制的完整流程，仍不写一键脚本和空间清理说明。
+
+- **四个分块**：`1. 首次安装`（Git + Docker 20+ / Compose 2+，clone → `up -d --build` → 访问地址与首次登录）→ `2. 可选：调整配置`（根目录 `.env` 的 `PORT` / `TZ` / `NPM_REGISTRY`，并注明 `NODE_ENV` 由 Compose 固定、写进 `.env` 不生效）→ `3. 常用命令` → `4. 数据与备份`。
+- **补齐的命令**：`docker compose config`、`logs -f --tail=100`、`restart qq-farm-bot`、`stop` / `start`、`git pull --ff-only` + `up -d --build`（更新）、`build --pull --no-cache` + `up -d --force-recreate`（强制重建）、命名卷备份的 `docker run ... tar czf`、NapCat 的 `docker build -f napcat/Dockerfile` 与 `docker run`。也写清了改 `PORT` / `TZ` 只需 `up -d`，改构建参数才必须重建镜像。
+- **边界不变**：不出现 `scripts/nas-deploy.sh`、一键更新/清理/重构、构建缓存回收、磁盘对账等内容；脚本文件与三条流水线功能一字未动。命令全部用原生 `docker compose`，新用户不依赖脚本也能完成部署与日常操作。
+- **测试同步**：`web/tests/nas-deploy.test.mjs` 里「章节行数小于 40」改为「小于 100」，把原先禁止出现的备份命令翻转为必须给出，并新增一组逐条断言锁住 12 条完整命令与 `.env` 配置写法；防设备信息泄露的脱敏锁、以及「不写运维脚本 / 清理空间」的关键词锁保持不变。
+
+### 2026-11-12 · v3.22.2（#150） · 精简 README 的 Docker 部署章节，只保留正常安装说明
+
+README 的「Docker 部署」原本有一大半是运维内容：一键更新/清理/重构的三条脚本命令、顺序不能调换的原因、六个可用开关、构建缓存与悬空镜像、「空间去哪了」的磁盘对账、备份命令示例和危险操作警告块。对第一次来装服务的人来说，这些内容既用不上，也把「怎么装起来」淹没了。现在整章收成 31 行（原来 88 行）。
+
+- **删掉的两节**：`📦 一键更新 / 一键清理 / 一键重构`（脚本命令表、执行顺序说明、开关表、脚本边界说明）和 `📦 空间去哪了`（诊断命令、磁盘对账解释、应用目录处理、账号数据备份示例、危险命令警告块）。
+- **保留并理顺的内容**：环境要求（Git + Docker Compose）→ `git clone` / `cd` / `docker compose up -d --build` → 访问地址与首次登录账号 → 端口、数据卷、日志卷一张表 → `ps` / `logs -f` / `down` 三条基础命令 → 一句「`down` 不删命名卷、不要加 `-v`」的安全提示 → NapCat 与详细参考链接。备份与迁移指向已有的「数据与备份」章节，不再重复贴命令。
+- **脚本本身不动**：`scripts/nas-deploy.sh` 与三条流水线全部保留、功能不变，只是不再写进面向安装的公开文档；日常运维照旧走脚本。
+- **测试同步**：`web/tests/nas-deploy.test.mjs` 里原先「README 必须出现脚本入口、备份命令、⚠️ 警告」的三条断言改为「Docker 章节必须包含完整安装步骤与基础命令，且不得出现脚本名、一键更新/清理/重构、构建缓存、磁盘对账等运维关键词，章节行数小于 40」，把「只讲安装」这个约束锁住；原来针对挂载路径 / 系统应用目录 / 实测容量的脱敏锁保持不变。
+
+### 2026-11-12 · v3.22.1（#139） · 金豆今日数值改由后端同源统计，移除浏览器本地基线
+
+上一版在首页「今日统计」新增了金豆、点券两张卡片，但后端只有金币/经验/点券的当日净增字段，金豆只能按「账号 + 本地日期」把当日基线存在浏览器里自己算。这带来一个真实差异：换浏览器、清缓存或清站点数据后，金豆会从当下这一刻重新起算，而金币和点券由后端统一记账、跨设备一致。现在把金豆也收进后端，四项数值完全同源。
+
+- **后端新增 `sessionGoldBeanGained`**：`core/src/services/stats.ts` 沿用金币/点券的口径，净值 = 当前余额 − 当日基线，消费高于收益时为负、不做 `Math.max(0, ...)` 夹断；`getStats` 随 status 一起下发，`core/src/runtime/runtime-state.ts` 的未登录默认 status 也补上该字段，前端不会读到 undefined。
+- **基线用「首次观测」初始化**：登录回调里金豆余额可能还没同步完，直接拿登录时的值（甚至 0）当今日起点会把全部余额算成今日净增。所以登录时把金豆当日基线留空，由第一次 status 观测到的真实余额初始化；金币/经验/点券原逻辑不变。
+- **跨重启 / 跨天 / 换账号统一由后端记账**：当日基线写进原有持久化存档，同日重启恢复后继续累计；跨天、重新登录时清空基线与增量，从新的一天重新起算。旧存档没有金豆基线段时保持空值走首次观测——特别处理了 `Number(null) === 0` 这个陷阱，否则会把 0 误当基线。
+- **前端整套浏览器基线逻辑删除**：`Dashboard.vue` 现在只读 `sessionGoldBeanGained`，和金币/点券一样一行 computed；`localStorage` 基线、内存兜底、本地日期键、专为金豆加的 watch 和可独立测试的纯函数全部移除。四张卡片的顺序、样式、图标、负数配色、空态判定一个字都没动。
+- **资产卡不受影响**：没有新增「本次运行」金豆增量，资产卡 delta 仍是原来两项。
+
+新增 `core/tests/today-stats-gold-bean.test.js` 共 7 条，真跑编译后的 stats 模块，覆盖首次 0 / 涨为正 / 消费为负 / 掉线不重算 / 同日重启基线恢复 / 跨天重新起算 / 旧存档兼容 / 非法值不产生 NaN / 资产卡三项增量不变；`web/tests/today-stats-bean-coupon.test.mjs` 重写为 9 条，锁住四项同源、负数同色、卡片同款、前端不再有本地基线。升级后旧的浏览器基线缓存不会再被读取，无需手动清理。
+
+### 2026-11-12 · v3.22.0（#138） · 新增今日统计的金豆与点券今日数值卡片
+
+首页「今日统计」原来只有金币和经验两张增量卡片，现在在它们后面补上金豆、点券两张（金豆在前、点券在后），四张卡排在同一个两列网格里。
+
+- **显示逻辑与金币完全一致**：数值都是当日净值，不做 `Math.max(0, ...)` 夹断；花掉金豆或点券后当前余额低于当日基线就是负数，负号自带，不额外加号。为负数时套同一个 `--ui-danger` 负向色 token，跟金币卡片是同一个颜色，不是另配一套。
+- **卡片风格一字不差**：容器（`rounded-xl bg-gray-50 px-3 py-2 transition-transform hover:scale-105 dark:bg-gray-700/30`）、图标尺寸（`h-5 w-5 object-contain 2xl:h-6 2xl:w-6`）、标签文字（`text-xs text-gray-500 2xl:text-sm`）、数字（`text-sm font-bold 2xl:text-base`）、暗色与悬停全部沿用原有卡片，没有给新卡单独写尺寸或颜色。经验卡原有的 carbon 星形图标保持不变。
+- **图标用项目内已有素材**：金豆 `gold-bean.png`、点券 `coupon.png`，与金币 `gold.png` 同目录、同为项目自带资源，不引外链、不新增图片文件。
+- **点券直接读后端**：`sessionCouponGained` 与金币 `sessionGoldGained` 同源，后端以当日基线算净值，本来就支持负数，直接复用即可。
+- **金豆的当日基线在前端算**：后端只下发当前余额 `status.goldBean`，没有当日净增字段。为遵守「只改今日统计模块、不改动其他任何地方」，基线按「账号 + 本地日期」存在浏览器，净值 = 当前余额 − 基线，跨天、换账号各自重新起算；掉线或余额未下发时不记基线，避免恢复后冒出一个虚高的数字；localStorage 不可用或内容损坏时退回内存基线。这段是可独立测试的纯逻辑，不碰 core 统计结构。
+- **空态判定同步补齐**：四项增量全为 0 且无动作记录时才显示「等待第一份收获」，避免金豆/点券有净值却被空态挡住。
+
+只改动 `web/src/views/Dashboard.vue` 中今日统计相关的脚本、模板与一条负向色样式；资产卡、库存卡、后端统计、其他视图一律未动。新增 `web/tests/today-stats-bean-coupon.test.mjs` 共 11 条回归，覆盖卡片顺序与同款样式、图标素材存在性、点券同源、负数配色、空态，以及金豆基线在首次/涨/消费为负/跨天/换账号/掉线/非法值/storage 降级下的真实数值。
+
+### 2026-11-11 · v3.21.0（#137） · 新增一键更新 / 一键清理 / 一键重构三条固定流水线
+
+以前 `scripts/nas-deploy.sh` 只有一个默认行为，清理、诊断、回滚全靠 `--prune-logs` / `--deep` / `--report` 这些开关拼出来，用的时候要记一堆参数。现在收成三条子命令，不带参数就是最常用的那条：
+
+```bash
+bash scripts/nas-deploy.sh            # 一键更新（默认）
+bash scripts/nas-deploy.sh rebuild    # 一键重构：彻底重建
+bash scripts/nas-deploy.sh clean      # 一键清理：服务不停
+```
+
+**顺序固定，不能调换**（`update` 与 `rebuild` 同序）：
+
+```
+git pull --ff-only → docker compose down → docker builder prune → docker compose up -d --build → docker image prune -f
+```
+
+三个理由都写进了脚本注释和 README：`down` 不先执行，容器会把旧镜像和旧层一直钉住，`prune` 回收到的永远是 0；`prune` 不放在 `build` 之前，磁盘快满时会直接 `no space left on device`；`image prune` 放在 `build` 之后，才是唯一能确定「上一版」的时机。
+
+- `update`：构建缓存裁到 2GB 上限（`--keep-storage`），日常够用又不至于每次从头构建。
+- `rebuild`：同样顺序，但缓存全清、旧镜像也清、容器 `--force-recreate`。适合「改了就是不对」这类情况。
+- `clean`：清悬空镜像 → 清空构建缓存 → 清本项目历史残留。**全程不碰运行中的容器**，服务不停。
+- 开关保留并统一：`--keep-cache`（更新时不动缓存）、`--prune-logs`、`--prune-orphans`、`--deep`、`--scan-volume`，可与任意模式组合。`--report` 改为 `report` 子命令，旧写法仍然兼容。
+
+**`clean` 新增「应用数据大目录」点名**：Docker 里榨干之后，剩下的往往落在系统自己的应用数据目录里，`prune` 一个字节都碰不到。`clean` 结束时按体积降序列出超过阈值的目录（`APP_BIG_DIR_MB` 可调，默认 1GB），并明确写出处理方式 —— 到应用中心卸载/重装对应应用。脚本只读数，绝不删除：手删之后应用中心仍显示「已安装」但应用打不开，而且不会自愈。
+
+顺带修掉三处：
+
+- 清理历史残留时给容器名加了字符集约束（`^qq-farm[A-Za-z0-9_.-]*$`）。原来只按空格拆分，格式串一旦返回多列就会把整行当名字去 `rm`。
+- 应用目录的体积显示改为单位自适应（`G` / `M` / `K`），排序按原始 KB 数进行 —— 用格式化后的「4.1G」字符串排序，4.1G 和 4.9G 会被当成同一个数。
+- `report` 里手动复现健康检查的那行命令修正了引号，之前复制出去会报 JS 语法错误。
+
+`git pull` 失败时流水线立即停住并说明原因，不会带着旧代码继续 `down` —— 那会让服务停在一个不该重启的版本上。重建失败时会明确提示「服务现在是停止状态、命名卷还在」，并给出单独重试的命令。
+
+验证：core 528/528、web 203/203、`pnpm lint` 0、`tsc`、`vue-tsc -b`、`vite build`、`sh -n`。三条流水线用模拟 docker + 模拟 git 实跑了完整调用序列，逐条核对顺序；并验证了 `git pull` 失败时后续步骤确实不执行。
+
+### 2026-11-11 · v3.20.2（#136） · README 的「Docker 部署」只留通用步骤，删掉某台机器的实测数据
+
+前几轮排查空间问题时，把一台具体机器的实测输出直接写进了 README：挂载路径、各目录大小、磁盘已用量，以及这台机器上还跑着哪些别的服务。README 是公开文档，这些属于使用者的设备信息，不该进仓库。
+
+- 删除整个「NAS 反复部署时的空间维护」小节（113 行），只保留能通用复用的部分：更新命令、`docker image prune -f`、`--report` / `--scan-volume` 两个只读诊断入口、备份命名卷的命令，以及 `down -v` 一类的危险操作警告。
+- 端口与卷的表格、`git clone` 安装步骤、`down` 不带 `-v` 的说明原样保留。
+- 脚本注释里同样带着那台机器的服务名和单个容器的体积，一并改成通用描述（只改注释，行为不变）。
+- 测试改写成「README 不得出现具体挂载路径 / 系统应用目录 / 实测容量」的回归锁，且不在测试里复述那些服务名。
+
+### 2026-11-11 · v3.20.1（#135） · 修掉 `--scan-volume` 下「让你再跑一遍自己」的自相矛盾提示
+
+真机输出里暴露的小毛病：已经带了 `--scan-volume`，前面「Docker 之外的部分」还在提示「要摊开看：`bash scripts/nas-deploy.sh --report --scan-volume`」，紧接着下面就是扫描结果，读起来像在自说自话。
+
+改成按 `SCAN_VOLUME` 分支：扫过就只写「这个卷的目录占用见下面」，没扫才给命令。测试锁住这个分支。
+
+### 2026-11-11 · v3.20.0（#133） · 新增 `--scan-volume`：把「Docker 之外那 27G」自动摊开，查出来是 fnOS 的 `@appmeta` / `@sysappmeta`
+
+**现象**：上一轮的「磁盘对账」已经把差额算出来了，但只给了一条要手敲的命令。真机敲完（`du -xsh /vol1/* | sort -rh`）：
+
+```
+10G     /vol1/@appmeta       ← fnOS 应用中心元数据 / 安装包
+9.1G    /vol1/@sysappmeta    ← fnOS 系统应用元数据
+9.1G    /vol1/docker         ← Docker 全部（含别的 10 个服务 + 本项目 330MB）
+4.3G    /vol1/@appdata       ← 应用真实数据（影视库、相册索引、下载内容）
+2.3G    /vol1/1000           ← 用户主目录
+```
+
+**结论**：36G 已用里 Docker 只占 9.3G，剩下 27G 有 **19G 是 fnOS 自己的两个 `@appmeta` 目录** —— 应用每升级/重装一次就在里面留一份旧版本，攒起来就是十几 G。它和本项目无关，`docker prune` 一个字节都碰不到，也不该手删（删了应用中心仍显示已安装、应用直接打不开）。
+
+**改动**：
+
+- 新增 `--scan-volume`（可单独用，也会自动带上 `--report`）：按卷顶层 `du -xsh` 排序，对最大的 5 个目录各下钻一层。以前要人敲三条命令来回贴输出，现在一次给全。
+- 命中 `@appmeta` / `@sysappmeta` / `@appdata` / `@appshare` 时才打印说明段：这些是 fnOS 管的目录、清理途径是应用中心卸载/重装或控制面板，脚本只展示不删。
+- 下钻判据用「是目录 + 大小不是 0」，不再靠 `G` 后缀做单位判断 —— `du` 的单位随体积变，写死 `G` 在小盘上会一个都匹配不到。
+- 下钻时排除 Docker 数据目录本身（上面已经量过），避免重复刷屏。
+- 不放进默认 `--report`：整卷可能有几十万文件，`du` 一遍几分钟，常规诊断不该被拖住。`--report` 里改为直接提示这条命令。
+- 脚本头部注释补上「`@app*` 也是常见大头」和 `--scan-volume` 用法；README 换成这次的实测目录表 + 禁止手删的警告。
+
+**只读保证**：新增函数只有 `du` 和 `echo`，除了清理自己的 `/tmp` 临时文件外没有任何删除动作；测试用过滤掉注释行与 `echo` 行后的代码块断言不含 `rm -rf`、不含对 `$volume` 路径的 `rm`。
+
+**验证**：`web/tests/nas-deploy.test.mjs` 新增 1 条用例（14/14 通过），用模拟 docker + 模拟 `df` 复刻「Docker 9.3G / 卷上还有 `@appmeta`」的场景实跑了 `--report --scan-volume` 全流程。
+
+### 2026-11-11 · v3.19.1（#132） · 磁盘对账汇总补上 `-x`：15G 虚报其实是 9.3G，另有 5.7G 是 overlay 视图重复算的
+
+**现象**：v3.19.0 的「磁盘对账」第一次在真机跑出来，数字对不上：
+
+```
+Docker 数据目录：/vol1/docker
+du 实测占用：15G
+前 8 大子目录：
+  7.1G  /vol1/docker/overlay2
+  1.6G  /vol1/docker/volumes
+  498M  /vol1/docker/containers
+   49M  /vol1/docker/buildkit
+   13M  /vol1/docker/image
+```
+
+明细加起来 **9.3G**，汇总却写 **15G** —— 多出 5.7G，看起来像是「有条漏网的大文件」，很容易再带错一轮。
+
+**根因**：汇总那行写的是 `du -sh "$root"`，**漏了 `-x`**，而明细用的是 `du -sxh`。`/vol1/docker` 下 `overlay2/<id>/merged` 是 overlay 的挂载点，`du` 一跨进去就把每个容器的完整根目录视图再算一遍（mysql 501MB + sq 音乐 1.57GB + xiaoya 800MB + 青龙 1.13GB…，合计正好那 5.7G）。这些视图是叠加视图，不是新增占用。两个口径混用，等于自己造了个不存在的缺口。
+
+**改动**：
+
+- `show_disk_audit()` 汇总改 `du -sxh "$root"`，与明细同口径，并标注「-x：不跨进 overlay 挂载点/别的文件系统」。测试锁 `doesNotMatch(/du -sh "\$root"/)`，防止退回。
+- 新增「可回收的镜像」段：列 `<none>`（重建后没清的上一版）及其体积 + `docker image prune -f`。真机上是 327MB，一条命令就能回来。
+- 构建缓存那行补上口径说明：`system df` 报 791MB、`buildx du` 报 1.177GB，而 `buildkit` 目录实测只有 **49MB** —— 前两个是缓存记录的逻辑大小，后者才是真占盘，不能混着当空间用。
+- 新增「Docker 之外的部分」：说明 `df` 的 Used 减掉 du 就是非 Docker 占用，并给出拆解命令（不自动跑，数据盘上几十万文件 du 一遍要好几分钟）。
+- 读法说明改成按数据说话：构建缓存要看「记录 vs 落盘」，而不是笼统说「Build Cache 小」。
+- `README.md` 空间维护章节换成这次的真机数字，并把「`du` 必须带 `-x`」写成显式警告。
+
+**顺带确认的两件事**（都在真机上验证过了）：
+
+- **`(unhealthy)` 已修复**：探针改成 node + `127.0.0.1` 后，重建 4 分钟就 `Up 4 minutes (healthy)`。原先 `wget` 打 `localhost` 的坑是实锤。
+- **本项目占用确实只有约 330MB**：`qq-farm-bot:latest` 327MB + `qq-farm-data` 58kB + `qq-farm-logs` 2.53MB，日志卷 2.53MB 说明体积守卫在起作用。该卷 80G 已用 36G，扣掉 Docker 的 9.3G，**约 27G 在 Docker 之外**（别的服务的数据、用户文件），`prune` 碰不到。
+
+**验证**：core 528/528、web 198/198、`pnpm lint` 0、core `tsc`、`vue-tsc -b`、`vite build`、`sh -n` 全过；用 mock docker（复刻这次真实输出 + `<none>` 悬空镜像）实跑 `--report`，对账、可回收镜像、日志、Docker 之外四段均正常输出。
+
+### 2026-11-11 · v3.19.0（#131） · NAS 空间诊断新增磁盘对账与健康检查明细，探针不再依赖 wget
+
+**现象**：NAS 反复重建后占用从 30G 涨到 37G，跑完清理只掉 2G（37G → 35G）。按上一版建议跑 `--report`，实测数据又推翻了一条结论。
+
+```
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          11        11        4.965GB   8.442MB (0%)
+Containers      11        11        915.3MB   0B (0%)
+Local Volumes   11        5         1.505GB   15.12MB (1%)
+Build Cache     23        0         0B        0B          # buildx du 实测 193MB
+```
+
+**上一版说错的地方**：`--report` 把「Containers ACTIVE=11」判成「有 10 个历史遗留的重复实例」。实际 `docker ps -a` 列出来是 **10 个不同的服务 + 本项目 1 个**（贴吧签到的 web/db、音乐下载与 sq 音乐三个、mysql、lucky、xiaoya-tvbox、qd、青龙），各自钉住一份镜像完全正常 —— 这台机器上**压根没有重复实例**。按容器个数猜冗余，会在多服务 NAS 上稳定误报。
+
+**真正的账**：这 7.4GB 里属于本项目的只有约 **330MB**（`qq-farm-bot:latest` 327MB + 两个命名卷约 2.5MB），`docker image prune` 本来也回收不出东西。所以「清了只掉 2G」不是清理命令写错了，是**能清的本来就只有几百 MB**，剩下的 5G 在 Docker 之外 —— 那部分 `prune` 永远碰不到，得先把它量出来。
+
+**改动**：
+
+- `--report` 新增 `show_disk_audit()`：数据目录从 `docker info --format '{{.DockerRootDir}}'` 取（NAS 常把 data-root 挪到数据盘，写死 `/var/lib/docker` 会 du 到空目录、得出「Docker 只占 0B」的错误结论），输出 `du` 实测占用、前 8 大子目录、所在文件系统的 `df`、文件系统类型；是 btrfs/zfs 就直接 `btrfs subvolume list -s` 数快照，并说明快照占的空间 `prune` 管不到。
+- `--report` 逐个体积列出容器的 `*-json.log`：`system df` 的 Containers 行不拆分日志，日志暴涨时看不出。
+- `--report` 新增 `show_health_detail()`：容器 `(unhealthy)` 时打印探针的历史退出码与输出。`docker ps` 只给结论，分不清「服务没起来」和「探针命令写错」。
+- `show_read_guide()` 的冗余判据从「容器数量 > 1」改成「同一个镜像起了多个容器」（`docker ps -a --format '{{.Image}}' | sort | uniq -d`），不再把多服务 NAS 的正常容器误报成冗余；「属于本项目的容器 > 1」这条仍然保留。
+- **修掉一直挂着的 `(unhealthy)`**：探针原来是 `wget -q --spider http://localhost:3007/...`，alpine 的 busybox wget 解析 `localhost` 时可能先试 `::1`，而应用只监听 IPv4 的 `0.0.0.0`，探测直接连接被拒 → 容器永久 unhealthy。改成容器自带的 node 发请求并显式指到 `127.0.0.1`，`r.ok` 才判健康（4xx/5xx 也算失败）；`start_period` 由 10s 放宽到 30s，避免 ARM 机器上冷启动被算成失败。`docker-compose.yml` 与 `core/Dockerfile` 两处保持一致。
+- `--help` 不再用 `sed -n '2,26p'` 写死行号，改成打印文件头注释直到 `set -eu`，改注释不会把用法说明截断。
+- `scripts/nas-deploy.sh` 头部说明与 `README.md` 空间维护章节按实测数据重写：**大盘里的大头首先是别人的服务**，其次才是镜像/可写层，构建缓存再次之，最后是对不到账的 Docker 之外部分。
+
+**验证**：core 528/528、web 197/197、`pnpm lint` 0、core `tsc`、`vue-tsc -b`、`vite build` 全过；`sh -n` / `bash -n` 语法通过；用模拟 `docker`（复刻用户真实 `system df` / `ps -a` / `inspect` 输出）实跑 `--report` 全流程，对账段、日志段、健康检查段均正常输出；健康探针一行命令单独实测：200 → exit 0，401 / 域名错误 / 端口关闭 → exit 1，无挂死。
+
+### 2026-11-11 · v3.18.0（#130） · `--report` 改为全量诊断并新增 `--prune-orphans`，纠正「构建缓存占大头」的误判
+
+**现象**：按上一版建议跑 `--report`，实测数据推翻了上一版的结论 —— 真正占满空间的不是构建缓存。
+
+```
+TYPE            TOTAL     ACTIVE    SIZE      RECLAIMABLE
+Images          11        11        4.965GB   8.442MB (0%)
+Containers      11        11        915.3MB   0B (0%)
+Local Volumes   11        5         1.505GB   15.12MB (1%)
+Build Cache     23        0         0B        0B          # buildx du 实测 193MB
+```
+
+- 构建缓存只有 **193MB（约 0%）**，不是大头。
+- 镜像 **4.965GB 全部 ACTIVE**、可回收仅 8.4MB：因为还有容器引用着，被引用的镜像不算 dangling，`docker image prune` 一条都删不掉。
+- 容器 **11 个全在跑**，而本项目正常只需 1 个 —— 历史上换过 compose project 名 / 换过目录留下的实例，各自钉住一份镜像 + 一层可写空间。
+- 卷里 `qq-farm-bot-go_qq-farm-bot-data`、`qq-farm-test-data`、`qq-farm-test-logs` 均为 LINKS=0 的历史残留。
+
+**根因**：`--report` 结尾那句「Build cache 一行占大头 → 直接跑 nas-deploy.sh」是**硬编码文案，不看实际数据**，把排查方向指错了；同时卷列表用 `head -n 6` 截断，11 个卷只显示 5 个，看不到残留。
+
+**改动**：
+
+- `--report` 新增 `show_report_detail()`：不截断地列出全部镜像、容器、卷，并单独标出 LINKS=0 的残留卷。
+- `--report` 新增 `show_read_guide()`：只讲怎么看表（可回收≈0 的真实含义、ACTIVE>1 是重点信号、`du -sh /var/lib/docker` 兜底），**不再替用户下结论**；当属于本项目的容器 >1 个时直接点名并给出 `docker stop` / `docker rm` 命令。
+- 新增 `--prune-orphans`：只删**已停止**的本项目容器（名字以 `qq-farm` 开头且不是 `qq-farm-bot`），删前再用 `docker ps -q --filter name=^X$` 二次确认未运行；随后清悬空镜像。
+- **残留卷只报告不删除**：`qq-farm-bot-go_*` / `qq-farm-test-*` 里可能是早期账号数据，删错不可恢复，而这部分实测只有约 13MB，不值得冒风险。脚本只打印 `docker volume rm` 命令供用户自行确认。
+- `--help` 移到 docker 存在性检查之前，没装 Docker 的机器也能看用法；`docker` 缺失时给出明确错误而不是 `command not found`。
+- `README.md` 空间维护章节按实测数据重写：明确「大头是被容器钉住的镜像，不是构建缓存」，补 `--report` / `--prune-orphans` 用法与 `docker ps -a` 先看容器的排查顺序。
+
+**验证**：core 528/528、web 194/194、`pnpm lint` 0、core `tsc --noEmit`、`vue-tsc -b` 全过；`sh -n` 语法通过；用模拟 `docker` 输出实跑了 `--report` 与 `--prune-orphans` 两个分支，并用真实 `docker system df -v` 样本验证卷过滤的 awk 逻辑。
+
+### 2026-11-11 · v3.17.9（#129） · 修复 NAS 反复构建后空间清不干净：`builder prune` 补上 `-a`，日志加体积上限
+
+**现象**：NAS 上反复 `docker compose up -d --build`，占用一路上涨；跑旧清理脚本只能回收 2G（37G → 35G），远高于安装前的 30G。
+
+**根因**：`docker builder prune` **不带 `-a` 时只删 dangling 缓存记录**，而每次重建产生的层缓存都不算 dangling —— 等于几乎没删。本项目 `version.json` 每次提交都变，会连带让 `COPY version.json → COPY web → pnpm -C web build` 重新执行，每部署一次新增 100–200MB 缓存（本地实测构建上下文 122MB，其中 `core` 44MB、`web/public` 36MB），攒起来正好是那 5G。
+
+**修复**：
+- `scripts/nas-deploy.sh` 全面重写清理段：
+  - `docker builder prune -a -f --keep-storage <bytes>`：带 `-a` 才真删，用容量上限（默认 2048MB，`BUILD_CACHE_KEEP_MB` 可调）按「最久未使用」顺序削到上限内，避免清一次干净、下次又涨回来。老引擎不认这些开关时逐级降级到 `buildx prune --max-used-space` 再到纯 `-a`。
+  - **回收改到构建之前**：老缓存先削下去，盘快满时构建不会因 `no space left` 失败。
+  - 新增 `--report`（只读诊断，不改任何东西）、`--deep`（清空全部构建缓存 + 未使用镜像）、`--prune-logs`（改为截断 `*.log` 全部文件，不再只认两个固定文件名）。
+  - 增加 `docker buildx du` 与卷占用明细输出，直接看出空间花在哪。
+- `core/src/services/logger.ts`：`logs` 是命名卷，`combined.log` 只追加不清理会一直涨（本地已到 4.8MB）。新增 `startLogSizeGuard()`，默认 100MB（`LOG_MAX_SIZE_MB` 可调）每 5 分钟检查一次并截断超限文件，定时器 `unref()` 不拖住进程退出。
+  - **刻意不用 winston 自带的 `maxsize` 轮转**：实测 winston 3.19 + Node 20 下，`maxsize` / `maxsize+maxFiles` / `maxsize+tailable` 三种组合落盘全是 0 字节空文件，启用等于静默丢日志。`core/tests/log-rotation.test.js` 用 `doesNotMatch` 把这条锁死。
+- `README.md`：改写空间维护章节，纠正「`docker builder prune -f` 是清空全部缓存」这个错误说法，补 `docker buildx ls` / `docker buildx du` 诊断与备份步骤。
+- `web/tests/nas-deploy.test.mjs`：新增「必须带 `-a`」「不得退回不带 `-a`」「`--report` / `--deep` 开关」等回归断言。
+
+**验证**：core 528/528、web 191/191 通过，`pnpm lint` 0 warning，core `tsc --noEmit` 通过；`sh -n` 语法检查通过，`--report` 在无 Docker 环境下优雅降级。实机验证 winston 落盘正常（改造后日志仍能写入并读到内容）。
+
+### 2026-11-11 · v3.17.8（#128） · 提交标题改为「版本号 · 第 N 次更新 · 更新内容」，原始说明下沉为正文
+
+**需求**：GitHub 上的提交标题要前面是版本号和更新次数、后面是更新内容，例如「v3.17.7 · 第 127 次更新 · 修正钩子文件可执行位…」。
+
+**实现**：
+- 新增 `.githooks/commit-msg`：`commit-msg` 阶段改不了提交内容，但**可以改写提交说明**，而版本号在上一步 `pre-commit` 已经算好，所以此时能拿到准确的 `vX.Y.Z` 与 `第 N 次更新`。
+- `scripts/version.mjs` 新增 `rewriteCommitMessage()` 与 `hasVersionPrefixLine()`，以及 `rewrite-commit-msg` 子命令：
+  - 首行改写为 `vX.Y.Z · 第 N 次更新 · <CHANGELOG 摘要>`，与版本总览表的内容一致。
+  - 原始提交说明（如 `fix(githooks): ...`）下沉为正文首段，不丢信息。
+  - **幂等**：首行已带版本前缀时原样返回，`git commit --amend` 不会反复叠加。
+- 标记位 `.git/FARM_VERSION_PENDING`：`pre-commit` 递增成功后创建，`commit-msg` 读到才改写，`post-commit` 兜底清理。这样 merge / amend / 手动 bump / `--no-verify` 等场景不会误改别人的提交说明。
+
+### 2026-11-11 · v3.17.7（#127） · 修正钩子文件可执行位，Linux/macOS 上版本递增才会真正执行
+
+**问题**：Windows 上 `core.filemode=false`，`chmod +x` 不会被 git 记录，两个钩子在索引里都是 `100644`。在 Linux/macOS 上 clone 后 git 会直接忽略这些钩子（提示 not set as executable），导致版本号不再自动递增。
+
+**修复**：用 `git update-index --chmod=+x .githooks/pre-commit .githooks/post-commit` 把索引模式改为 `100755` 并提交。Windows 上行为不变，Linux/macOS 上钩子可正常执行。
+
+### 2026-11-11 · v3.17.6（#126） · 版本号与更新内容合并为同一条提交，不再单独产生 chore(version) 记录
+
+**需求**：GitHub 上的提交历史里，每次更新都是两条 —— 一条是功能改动，紧跟一条 `chore(version): vX.Y.Z · 第 N 次更新`。用户要求以后版本号与更新内容只出现为一条记录。
+
+**根因**：版本递增挂在 `post-commit` 钩子上。这个时机意味着功能提交**已经落库**，版本文件只能靠第二次 `git commit` 带上，于是必然多出一条。
+
+**修复**：
+- 新增 `.githooks/prepare-commit-msg`：在提交对象生成**之前**递增版本号并 `git add` 版本文件，让它跟功能改动进入同一次提交。
+  - 用 `--message-file "$1"` 直接读 git 的 `COMMIT_EDITMSG`，跳过空行与 `#` 注释行取首行作为更新摘要（提交说明此时还没进入 `git log`，不能用 `--from-commit`）。
+  - 来源为 `merge` / `squash` / `commit`（`--amend`）时跳过，避免合并提交与修补提交把版本号顶乱。
+  - 双重去重：说明以 `chore(version)` 开头、或暂存区已含 `version.json`（手动 bump 过）、或空提交，都不再递增。
+- `.githooks/post-commit` 改为纯兜底：只检查本次提交有没有带 `version.json`，没带就提示（例如用了 `--no-verify`），**不再自动提交**。
+- `scripts/version.mjs` 新增 `--auto-stage`（只暂存不提交）与 `--message-file`（从文件取摘要），并新增 `readCommitSubject()`。
+  - 合并模式下「提交」列写 `—`：此时提交对象尚未生成，`HEAD` 还是父提交，拿它当本次提交号是错的。
+- 规则说明同步改为「版本号与更新内容合并进同一次提交」，测试断言从 `--auto-commit` 改为 `--auto-stage` + `--message-file`，并新增摘要提取与占位提交号的回归测试。
+
+### 2026-11-11 · v3.17.5（#125） · 收紧 NAS 部署脚本的构建缓存回收窗口：24 小时改为 1 分钟
+
+**需求**：用户一天要在 NAS 上反复安装很多遍，`docker builder prune -f --filter "until=24h"` 等于「一条都不清」——24 小时内产生的缓存全部保留，反复部署时构建缓存照样稳定上涨，脚本等于没做回收。
+
+**修复**（`scripts/nas-deploy.sh`）：
+- 过滤条件 `until=24h` 改为 `until=1m`，只保留刚刚这次构建产生的层，更早的构建缓存全部回收。
+- 同步改写脚本里的注释与执行前提示文案（原文写着「保留最近一次的可复用层」，改成 1 分钟后这个说法不再成立），避免文案与实际行为不符。
+- README 的一键命令注释同步改为「清 1 分钟前的构建缓存」。
+
+**副作用与取舍**：`until=1m` 只保留本次构建的层，下一次 `docker compose up -d --build` 时 `web-builder` 之后的层无法复用，构建会比保留 24h 缓存时慢一些（换来磁盘不再累积）。这对「一天装很多遍」的场景是想要的行为：每轮都能干净回收。若某次想临时留缓存跑快一点，直接执行 `docker compose up -d --build` 而不带清理脚本即可。
+
+**验证**：`web/tests/nas-deploy.test.mjs` **4/4** 通过（断言同步改为 `until=1m`）。脚本仍不使用 `down -v` / `--volumes` / `volume prune` / `rm -rf` / `docker rmi`，数据卷 `qq-farm-data` 与日志卷 `qq-farm-logs` 不受影响。服务器 / NAS 环境配置未改动。
+
 ### 2026-11-11 · v3.17.3（#123） · 修正版本钩子对 CHANGELOG 标题的版本号误判
 
 **问题**：上一条详细记录的标题里把 `v3.17.1` 当叙述写进去了（`复核…补修 v3.17.1 分项开关实时性回归`）。`scripts/version.mjs` 的 `markLatestChangelogTitle()` 用 `/v\d+\.\d+\.\d+/` 检测**整行标题**，把这种「描述里提到旧版本号」误判成「标题已带版本标记」而直接跳过打标，导致该条记录缺少 `v3.17.2（#122）`，`web/tests/version.test.mjs` 的版本接线断言失败（web 185/186）。

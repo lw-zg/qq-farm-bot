@@ -1,12 +1,148 @@
 {
   "major": 3,
-  "minor": 17,
-  "patch": 3,
-  "build": 123,
-  "version": "3.17.3",
-  "updatedAt": "2026-11-10T20:17:25.201Z",
-  "lastCommit": "f22b21b8",
+  "minor": 22,
+  "patch": 5,
+  "build": 152,
+  "version": "3.22.5",
+  "updatedAt": "2026-11-11T21:37:04.344Z",
+  "lastCommit": "—",
   "history": [
+    {
+      "version": "3.22.5",
+      "build": 152,
+      "date": "2026-11-12",
+      "summary": "回滚 README 的 Docker 部署命令补全，恢复精简安装说明",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.22.3",
+      "build": 151,
+      "date": "2026-11-12",
+      "summary": "补全 README 的 Docker 部署命令集",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.22.2",
+      "build": 150,
+      "date": "2026-11-12",
+      "summary": "精简 README 的 Docker 部署章节，只保留正常安装说明",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.22.1",
+      "build": 139,
+      "date": "2026-11-12",
+      "summary": "金豆今日数值改由后端同源统计，移除浏览器本地基线",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.22.0",
+      "build": 138,
+      "date": "2026-11-12",
+      "summary": "新增今日统计的金豆与点券今日数值卡片",
+      "commit": "—",
+      "type": "minor"
+    },
+    {
+      "version": "3.21.0",
+      "build": 137,
+      "date": "2026-11-11",
+      "summary": "新增一键更新 / 一键清理 / 一键重构三条固定流水线",
+      "commit": "—",
+      "type": "minor"
+    },
+    {
+      "version": "3.20.2",
+      "build": 136,
+      "date": "2026-11-11",
+      "summary": "README 的「Docker 部署」只留通用步骤，删掉某台机器的实测数据",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.20.1",
+      "build": 135,
+      "date": "2026-11-11",
+      "summary": "修掉 `--scan-volume` 下「让你再跑一遍自己」的自相矛盾提示",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.20.0",
+      "build": 133,
+      "date": "2026-11-11",
+      "summary": "新增 `--scan-volume`：把「Docker 之外那 27G」自动摊开，查出来是 fnOS 的 `@appmeta` / `@sysappmeta`",
+      "commit": "—",
+      "type": "minor"
+    },
+    {
+      "version": "3.19.1",
+      "build": 132,
+      "date": "2026-11-11",
+      "summary": "磁盘对账汇总补上 `-x`：15G 虚报其实是 9.3G，另有 5.7G 是 overlay 视图重复算的",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.19.0",
+      "build": 131,
+      "date": "2026-11-11",
+      "summary": "NAS 空间诊断新增磁盘对账与健康检查明细，探针不再依赖 wget",
+      "commit": "—",
+      "type": "minor"
+    },
+    {
+      "version": "3.18.0",
+      "build": 130,
+      "date": "2026-11-11",
+      "summary": "`--report` 改为全量诊断并新增 `--prune-orphans`，纠正「构建缓存占大头」的误判",
+      "commit": "—",
+      "type": "minor"
+    },
+    {
+      "version": "3.17.9",
+      "build": 129,
+      "date": "2026-11-11",
+      "summary": "修复 NAS 反复构建后空间清不干净：`builder prune` 补上 `-a`，日志加体积上限",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.17.8",
+      "build": 128,
+      "date": "2026-11-11",
+      "summary": "提交标题改为「版本号 · 第 N 次更新 · 更新内容」，原始说明下沉为正文",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.17.7",
+      "build": 127,
+      "date": "2026-11-11",
+      "summary": "修正钩子文件可执行位，Linux/macOS 上版本递增才会真正执行",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.17.6",
+      "build": 126,
+      "date": "2026-11-11",
+      "summary": "版本号与更新内容合并为同一条提交，不再单独产生 chore(version) 记录",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.17.5",
+      "build": 125,
+      "date": "2026-11-11",
+      "summary": "chore(deploy): NAS 部署脚本构建缓存回收窗口由 24 小时收紧到 1 分钟",
+      "commit": "ce55f8b1",
+      "type": "patch"
+    },
     {
       "version": "3.17.3",
       "build": 123,

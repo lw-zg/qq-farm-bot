@@ -491,11 +491,13 @@ const filteredOperations = computed(() => {
 // 老版本今日统计：主动作按次数排序展示，无记录的收进折叠区。
 const operationGroups = computed(() => partitionOperations(filteredOperations.value))
 
-// 当日新增金币/经验：后端以当日首次基线计算，跨重启与跨天均已处理。
-// 金币是净值（消费会扣减），消费高于收益时为负数，不能 clamp 到 0；
+// 当日新增金币/经验/金豆/点券：四项都由后端按当日基线算好下发，跨重启与跨天均已处理。
+// 金币、金豆、点券是净值（消费会扣减），消费高于收益时为负数，不能 clamp 到 0；
 // 负数按资产「本次运行金币」的负向色展示。经验只增不减，仍保持非负。
 const todayGoldGained = computed(() => Number(status.value?.sessionGoldGained) || 0)
 const todayExpGained = computed(() => Math.max(0, Number(status.value?.sessionExpGained) || 0))
+const todayGoldBeanGained = computed(() => Number(status.value?.sessionGoldBeanGained) || 0)
+const todayCouponGained = computed(() => Number(status.value?.sessionCouponGained) || 0)
 
 function getOpName(key: string | number) {
   return OP_META[String(key)]?.label || String(key)
@@ -1058,7 +1060,7 @@ useIntervalFn(updateCountdowns, 1000)
             description="启动账号后显示今日收获与互动统计"
             icon="i-carbon-connection-signal-off"
           />
-          <div v-else-if="!operationGroups.active.length && todayGoldGained === 0 && todayExpGained === 0" class="flex flex-col items-center justify-center gap-1 py-6 text-center">
+          <div v-else-if="!operationGroups.active.length && todayGoldGained === 0 && todayExpGained === 0 && todayGoldBeanGained === 0 && todayCouponGained === 0" class="flex flex-col items-center justify-center gap-1 py-6 text-center">
             <span class="i-carbon-sprout text-3xl text-gray-300 dark:text-gray-600" />
             <strong class="text-sm text-gray-700 dark:text-gray-200">等待第一份收获</strong>
             <p class="text-xs text-gray-400">
@@ -1066,7 +1068,7 @@ useIntervalFn(updateCountdowns, 1000)
             </p>
           </div>
           <template v-else>
-            <div class="grid grid-cols-2 mb-2 gap-2 2xl:gap-3" role="region" aria-label="今日金币与经验增量">
+            <div class="grid grid-cols-2 mb-2 gap-2 2xl:gap-3" role="region" aria-label="今日金币、经验、金豆与点券增量">
               <div class="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 transition-transform hover:scale-105 dark:bg-gray-700/30">
                 <div class="flex items-center gap-2">
                   <img src="/game-config/resource-icons/gold.png" alt="金币" class="h-5 w-5 object-contain 2xl:h-6 2xl:w-6" aria-hidden="true">
@@ -1087,6 +1089,28 @@ useIntervalFn(updateCountdowns, 1000)
                 </div>
                 <div class="text-sm font-bold 2xl:text-base">
                   {{ todayExpGained }}
+                </div>
+              </div>
+              <div class="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 transition-transform hover:scale-105 dark:bg-gray-700/30">
+                <div class="flex items-center gap-2">
+                  <img src="/game-config/resource-icons/gold-bean.png" alt="金豆" class="h-5 w-5 object-contain 2xl:h-6 2xl:w-6" aria-hidden="true">
+                  <div class="text-xs text-gray-500 2xl:text-sm">
+                    金豆
+                  </div>
+                </div>
+                <div class="ov-today-value text-sm font-bold 2xl:text-base" :class="{ 'is-down': todayGoldBeanGained < 0 }">
+                  {{ todayGoldBeanGained }}
+                </div>
+              </div>
+              <div class="flex items-center justify-between rounded-xl bg-gray-50 px-3 py-2 transition-transform hover:scale-105 dark:bg-gray-700/30">
+                <div class="flex items-center gap-2">
+                  <img src="/game-config/resource-icons/coupon.png" alt="点券" class="h-5 w-5 object-contain 2xl:h-6 2xl:w-6" aria-hidden="true">
+                  <div class="text-xs text-gray-500 2xl:text-sm">
+                    点券
+                  </div>
+                </div>
+                <div class="ov-today-value text-sm font-bold 2xl:text-base" :class="{ 'is-down': todayCouponGained < 0 }">
+                  {{ todayCouponGained }}
                 </div>
               </div>
             </div>
@@ -1589,6 +1613,11 @@ useIntervalFn(updateCountdowns, 1000)
 
 /* 今日统计金币净增为负时，与资产「本次运行金币」用同一个负向色。 */
 .ov-today-gold.is-down {
+  color: var(--ui-danger);
+}
+
+/* 金豆 / 点券净增为负时沿用同一个负向色，四张卡片配色保持一致。 */
+.ov-today-value.is-down {
   color: var(--ui-danger);
 }
 
