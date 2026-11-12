@@ -1,12 +1,84 @@
 {
   "major": 3,
-  "minor": 22,
-  "patch": 5,
-  "build": 152,
-  "version": "3.22.5",
-  "updatedAt": "2026-11-11T21:37:04.344Z",
+  "minor": 23,
+  "patch": 2,
+  "build": 162,
+  "version": "3.23.2",
+  "updatedAt": "2026-11-12T22:09:06.366Z",
   "lastCommit": "—",
   "history": [
+    {
+      "version": "3.23.2",
+      "build": 162,
+      "date": "2026-11-13",
+      "summary": "Docker Hub 直连超时时，NapCat 镜像改用加速站或本地标签",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.23.1",
+      "build": 161,
+      "date": "2026-11-13",
+      "summary": "QQ 取码链路收口：优先 getOpenAuth，NapCat 基础镜像补固定版本与离线导入路径",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.23.0",
+      "build": 160,
+      "date": "2026-11-13",
+      "summary": "移植 YYB-Go-Enhanced 完整保活方案：会话复用、错误分级与只滚令牌续期",
+      "commit": "—",
+      "type": "minor"
+    },
+    {
+      "version": "3.22.11",
+      "build": 159,
+      "date": "2026-11-12",
+      "summary": "掉线后无法自愈：补上 QQ 重登与登录失败兜底",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.22.10",
+      "build": 158,
+      "date": "2026-11-12",
+      "summary": "全仓完整性复查：修复统计基线、登录初始化与若干判定缺陷",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.22.9",
+      "build": 157,
+      "date": "2026-11-12",
+      "summary": "成熟唤醒与活动/好友成熟计划的时间基准修正",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.22.8",
+      "build": 156,
+      "date": "2026-11-12",
+      "summary": "自家农场成熟驱动唤醒与农场调度健壮性补强",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.22.7",
+      "build": 155,
+      "date": "2026-11-12",
+      "summary": "全仓完整性检查：修复六处影响统计与农场自动化的缺陷",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.22.6",
+      "build": 153,
+      "date": "2026-11-12",
+      "summary": "修正调度器注释与清理帮忙间隔的无效配置读取",
+      "commit": "—",
+      "type": "patch"
+    },
     {
       "version": "3.22.5",
       "build": 152,

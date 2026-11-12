@@ -15,6 +15,15 @@
 
 | 版本 | 更新序号 | 日期 | 更新内容 | 提交 |
 | --- | --- | --- | --- | --- |
+| v3.23.2 | #162 | 2026-11-13 | Docker Hub 直连超时时，NapCat 镜像改用加速站或本地标签 | — |
+| v3.23.1 | #161 | 2026-11-13 | QQ 取码链路收口：优先 getOpenAuth，NapCat 基础镜像补固定版本与离线导入路径 | — |
+| v3.23.0 | #160 | 2026-11-13 | 移植 YYB-Go-Enhanced 完整保活方案：会话复用、错误分级与只滚令牌续期 | — |
+| v3.22.11 | #159 | 2026-11-12 | 掉线后无法自愈：补上 QQ 重登与登录失败兜底 | — |
+| v3.22.10 | #158 | 2026-11-12 | 全仓完整性复查：修复统计基线、登录初始化与若干判定缺陷 | — |
+| v3.22.9 | #157 | 2026-11-12 | 成熟唤醒与活动/好友成熟计划的时间基准修正 | — |
+| v3.22.8 | #156 | 2026-11-12 | 自家农场成熟驱动唤醒与农场调度健壮性补强 | — |
+| v3.22.7 | #155 | 2026-11-12 | 全仓完整性检查：修复六处影响统计与农场自动化的缺陷 | — |
+| v3.22.6 | #153 | 2026-11-12 | 修正调度器注释与清理帮忙间隔的无效配置读取 | — |
 | v3.22.5 | #152 | 2026-11-12 | 回滚 README 的 Docker 部署命令补全，恢复精简安装说明 | — |
 | v3.22.3 | #151 | 2026-11-12 | 补全 README 的 Docker 部署命令集 | — |
 | v3.22.2 | #150 | 2026-11-12 | 精简 README 的 Docker 部署章节，只保留正常安装说明 | — |
@@ -161,6 +170,154 @@ flowchart TB
 ```
 
 ## 详细记录
+### 2026-11-13 · v3.23.2（#162） · Docker Hub 直连超时时，NapCat 镜像改用加速站或本地标签
+
+- **现象**：在宿主机上执行 `docker manifest inspect mlikiowa/napcat-docker:v4.18.42` 返回 `failed to configure transport: error pinging v2 registry: Get "https://registry-1.docker.io/v2/": net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers)`。
+- **定性**：这是网络层的连接超时，不是「标签不存在」。`docker manifest inspect` 由 Docker CLI **直接连接 registry**，不经过宿主机的 `registry-mirrors` 配置；因此在 `docker.io` 无法直连的网络里，它必然超时，也**不能用来判断标签是否可用**。会走镜像加速的是 `docker pull`，两者行为不同。
+- **文档缺口**：上一版只写了「用 `--build-arg NAPCAT_IMAGE=<版本号>` 固定版本」和「离线 `docker load`」两条路，没有覆盖「registry 直连不通、但加速站可用」这种最常见的情况，也没有说明 `manifest inspect` 与 `pull` 的差异，排查时容易被超时误导成版本不存在。
+- **补全获取路径**（`docs/detailed-reference.md`「部署细节」）：① 明确 `manifest inspect` 不走 `registry-mirrors`、验证标签请改用 `docker pull`；② 给出加速站前缀的构建写法 `--build-arg NAPCAT_IMAGE=docker.m.daocloud.io/mlikiowa/napcat-docker:<版本号>`，与 `docker-compose.yml` 里 `NODE_IMAGE` 的写法一致；③ 补一句「宿主机已有该镜像时直接把 `NAPCAT_IMAGE` 写成 `docker images` 里的本地标签，构建阶段不产生任何拉取」。
+- **注释同步**（`napcat/Dockerfile`）：在 `ARG NAPCAT_IMAGE` 上方注明它接受任意完整镜像地址、加速站前缀怎么写、以及 `manifest inspect` 不吃 `registry-mirrors` 这一点。默认值仍保持 `mlikiowa/napcat-docker:latest`，可由 `--build-arg` 覆盖。
+- **事实核对**：归档仓的 release 产物里实际存在 `napcat-docker-v4.15.0-{amd64,arm64}.tar`、`v4.18.19-*`、`v4.18.42-*` 三组版本。至于 Docker Hub 上这些标签是否仍然存活，本机与部署机都无法直连 `registry-1.docker.io`，仍未能确认，所以没有把某个版本号写死成默认值。
+- **测试**：`core/tests/napcat-plugin-ladder.test.js` 由 5 条增至 6 条——新增「文档说明 manifest inspect 不走镜像加速」一条（锁 `registry-mirrors`、加速站前缀、`docker pull` 三处表述），并在「`NAPCAT_IMAGE` 仍可覆盖」里加断言锁住 Dockerfile 注释中的加速站示例。
+- **边界**：不改任何 QQ 协议常量、不改 Docker Compose、不改 NAS / 服务器配置；`NAPCAT_IMAGE` 默认值保持原样。
+
+### 2026-11-13 · v3.23.1（#161） · QQ 取码链路收口：优先 getOpenAuth，NapCat 基础镜像补固定版本与离线导入路径
+
+- **来源**：为排查 QQ 账号掉线，横向核对了两个第三方项目——`DandanLLab/SnowCatQQ`（自称 NapCat 4.18.28 底座 + SnowLuma 融合）与 `XingYunStar/NapCatQQ`（NapCat 归档仓）。前者 `packages/` 目录与 NapCat 逐个对应（`snowcat-core` ↔ `napcat-core` 等），实为同一份源码的改名分支，没有独立的 QQ 登录协议实现；后者提供了当前版本的源码与 release 产物，正好用来核对我们的插件。
+- **取码入口的确定答案**：`NodeIKernelNodeMiscService` 的接口声明里**只有** `getOpenAuth(arg1, arg2)`，而在 `NodeIKernelMiniAppService` 里同样找不到 `checkSessionForMiniApp` / `loginWithAppId` / `getOpenCodeWithAppId`。这三个名字是更早版本 NapCat 的命名，在当前版本上不存在，插件的四步探测实际只有最后一步有效。
+- **顺序改成 getOpenAuth 优先**（`napcat/plugins/qq-miniapp-openauth`）：它第一个参数传 `true` 表示「要新的 Code」；而 `checkSessionForMiniApp` 语义是查已有会话，很可能返回上一轮已被 worker 消费掉的旧 Code——那种 Code 写进账号后连接会被网关拒绝，要等下一轮才能自愈。三个老命名保留为兜底（老版本 NapCat 上 `getOpenAuth` 不存在），但不再排在新 Code 之前。
+- **供应链问题**：NapCat 上游源码仓库 `NapNeko/NapCat` 已返回 404，`NapNeko/NapCatQQ` 只剩 1KB 空壳。而 `napcat/Dockerfile` 的基础镜像是 `mlikiowa/napcat-docker:latest`——浮动标签在这种情况下一旦被覆盖或清理，重建会失败，也无法复现当前正在运行的版本。
+- **补上两条部署路径**（`docs/detailed-reference.md`「部署细节」）：① 用 `--build-arg NAPCAT_IMAGE=mlikiowa/napcat-docker:<版本号>` 固定版本；② 镜像仓库不可达时，从归档仓的 release 产物取分架构的 `napcat-docker-v<版本号>-<架构>.tar`，`docker load` 后指向本地标签，全程不访问 registry。`napcat/Dockerfile` 相应加注释，`NAPCAT_IMAGE` 构建参数本身保持不变。
+- **未做的两件事（附原因）**：① `NAPCAT_IMAGE` 默认值仍是 `:latest`——本机到 Docker Hub 与 `registry-1.docker.io` 均不可达（连接直接失败），无法确认哪些 tag 还存活，凭空写一个版本号不如留待部署侧用 `docker manifest inspect` 确认；② 内置插件会忽略请求里的 `uin`（`index.mjs` 只读 `appId`），而 `qq-credential` 拿到 Code 后直接写盘，多 QQ 账号场景存在把 A 的 Code 写进 B 账号的串号风险。修法是在写入前比对返回的 `uin` 与账号 `uin`，但账号 `uin` 在扫码登录路径下可能为空、格式也未经真机验证，改动会让自动重签在格式不符时整体失效，因此单独一版先小范围验证。
+- **测试**：新增 `core/tests/napcat-plugin-ladder.test.js`（5 条静态回归）：锁定「`getOpenAuth` 排第一」「三个老命名不得删除且不得前置」「`getOpenAuth` 首参为 `true`」「`NAPCAT_IMAGE` 仍可覆盖」「文档同时给出固定版本与离线导入两条路」。
+- **边界**：不改任何 QQ 协议常量、不改 Docker Compose、不改 NAS / 服务器配置；本次只动插件取码顺序与部署文档。
+
+### 2026-11-13 · v3.23.0（#160） · 移植 YYB-Go-Enhanced 完整保活方案：会话复用、错误分级与只滚令牌续期
+
+- **来源**：对照 `525815266/YYB-Go-Enhanced`（同一套应用宝 PC 微信授权协议，实现比本项目完整）逐文件比对后，把它的保活模型、错误分类、登录预算与 HTTPDNS 策略移植过来。协议常量本来就一致（host appid `wxd44977328b36e647`、服务端 ECDH 公钥、`/ilink/ilinkapp/mp/wxaruntime_transfer`、`js-login` cmdID `1029`、clientVersion `524545`），所以这次改的不是协议本身，而是「什么时候、以什么代价去用它」。
+- **根因（为什么老版本能跑好几天，现在两天就掉）**：原来在到期前 **45 分钟**就去打 `pcyyb_refresh_token_auth`，拿到 token 后顺手再取一次 loginBuffer、换一次 Code、把账号连接重启一遍。三个后果叠加：① 官方续期窗口只有约 4 分钟，提前 45 分钟属于窗口外空打，YYB-Go-Enhanced 的注释里明确记着这条路由有「延时失效」记录；② 每 2 小时重启一次连接，面板上看起来就像频繁掉线；③ 每次续期多打一次 `pcyyb_get_wx_login_buffer_auth`，而决定授权存活的是 OAuth 层调用次数，不是业务请求数。
+- **只滚令牌续期**：`WxLoginService` 拆出 `refreshOAuthToken()`（只滚 access/refresh token）；`wx-credential` 相应分成 `renewOAuthToken()`（后台保活专用，不取 loginBuffer、不换 Code、不重启）与 `refreshAccountCredential()`（token + buffer + Code 全链路，只在确实缺 Code 时调用）。`wx-keepalive` 的预检改走前者，提前量 `RENEW_AHEAD_MS` 由 45 分钟收紧到 **5 分钟**，且成功后**不再 `restartWorker`**——面板上「每 2 小时闪一次」随之消失。
+- **按需换码**：掉线重登改为先用 `ensureFreshGameCode()` 拿 loginBuffer 直接换 Code（**零 OAuth 调用**），只有 buffer 被服务端拒绝且存在 refresh token 时才滚一次 token。`-14` 与 `-109` 都不再触发滚动续期。
+- **错误分级**（新增 `core/src/services/wx-login/recovery-policy.ts`，对应 Go 的 `code_recovery.go`）：`-14` 判为 AppID 侧拒绝（`application_rejected`，不是凭证失效）；`-10` 判为 ticket 被拒（允许重取一次）；`-101 / 40014 / 42001` 判为 access token 失效（还能救）；`-109 / 42007 / 40030 / 42002` 与 `40188 + invalid scope` 判为凭证已吊销（`needsRescan`，停止自动重试）；其余传输错误保持可重试。文案判定只在同时出现「invalid/expired/无效/过期/失效」与「refresh token/刷新令牌」时才判死，避免把代理的 `token expired` 当成微信吊销。
+- **-14 修复闸门**：同一会话在两分钟内刚成功拿到过 Code 时，`-14` 不再触发重新登录（`FRESH_SESSION_WINDOW_MS`），避免「AppID 拒绝 → 重新登录 → 更频繁被拒」的反向循环。
+- **动态退避**：`computeRefreshBackoff()` 取 `min(5 分钟, max(30 秒, 剩余寿命 / 2))`；token 已过期给 15 分钟（续期窗口已过，每 tick 重试只是重复被拒）；确定吊销直接熔断到当天结束。原来的固定 5 分钟退避会整窗错过官方 4 分钟窗口。
+- **登录预算**（新增 `core/src/services/wx-login/login-budget.ts`，对应 `login_budget.go`）：滑动窗口 **10 分钟 3 次 / 账号**，只在「新建 ticket + ManualAuth」这种真正让 OAuth 层干活的路径上扣额度；会话缓存命中、保活滚令牌、用户手动续期都不计数。额度用尽时直接返回原有错误，不再打上游。
+- **会话复用**（新增 `core/src/services/wx-login/session-cache.ts` + `native-protocol` 改造）：把握手结果（sendKey / recvKey / f9 / uin / deviceId / hostAppId / PSK / ticket）按「loginBuffer 摘要 + AppID」缓存 20 分钟，换 Code 时直接走短链 early data，跳过整个长链握手与 ManualAuth。会话被拒或超时才退回完整握手。缓存只在进程内，**不落盘**（会话密钥写进 `store.json` 等于把可解密通道的钥匙存到磁盘上）。
+- **业务拒绝码解析**：`native-protocol` 解析 `wx.login` 的 JSLoginResponse 时，先看 `BaseResponse.ret` / `JSAPI Result.ret`，非 0 就抛 `-14` 这类业务拒绝，再找 `code`。早期实现只找 code，找不到就报「解密失败」，于是把「AppID 拒绝」误当成「会话失效」去重新登录。`ret` 是 varint 全 64 位编码的负数，要按 `BigInt.asIntN(32)` 还原，否则 `-14` 会打印成 `18446744073709551602`。
+- **HTTPDNS 修正**（新增 `core/src/services/wx-login/httpdns.ts`，对应 `newdns.go`）：去掉已被微信下线的短链兜底 IP `120.241.131.173`，换成 `116.128.171.253` / `140.207.120.146` / `182.50.15.223` / `182.50.15.171`；短链协议优先 `mmtlsoverhttp`（当前后端在用），长链优先 `mmtlsovertcp`；长链端口按 `443 → 8080 → 80 → 5000` 排序（部分代理只放行 443）；DNS 查询的 `clientversion` 由 `0` 改为 `524545`（传 0 服务端可能返回空列表）；新增 `longcloud.weixin.com:443` 域名直连槽位，DNS 全挂时仍有路可走；结果缓存 10 分钟。
+- **降级而不是判死**：授权被吊销但连接仍在线时，日志输出「仅会话模式」并暂停自动续期，等用户重新扫码，而不是立刻把账号判死；`wxCredentialNeedsRescan` 标记让保活下一轮不再空转，重新扫码 / 手动填 Code 换到新凭据时自动清除。
+- **未采纳（并说明原因）**：① `cmd 3198 AutoAuth` 需要持久化会话密钥并用硬编码公钥验 ECDSA 签名，属于协议核心改造，没有离线实验台不敢上，先用「会话缓存 + 按需换码」拿到同等收益；② H5 取码路线（完全不走 mmtls）与 PCMgr 通道属于第三条兜底链路，自用单账号用不上；③ `pool.go` 的多 channel / provider 抽象 / 熔断总控是为「授权服务商、几十个账号并发」设计的，照搬只增加维护面。
+- **行为变化（用户可见）**：① 账号不再每 2 小时重启一次连接；② 「即将到期」提示窗口由 45 分钟收紧到 10 分钟（后端 5 分钟才真正续期，原来琥珀色会亮 40 分钟却什么都不发生）；③ 凭证真死时日志直接写「授权已被服务端吊销，需要重新扫码」，不再每 60 秒空转一次。
+- **测试与验证**：新增 `wx-recovery-policy.test.js`（6）、`wx-httpdns.test.js`（6）、`wx-login-budget.test.js`（6）、`wx-session-cache.test.js`（5）、`wx-login-code-parse.test.js`（5）；`code-preflight.test.js` 按新模型重写（28），`wx-credential-refresh.test.js` 补 4 条分层续期用例。core **598 → 634**、web **215/215**、`pnpm lint` 0、`build:ts` / `vue-tsc -b` / `vite build` 全过。
+- **边界**：会话缓存只在进程内有效，容器重启后首次换 Code 仍要完整握手一次；登录预算对「手动点续期」不设限，与上游一致；本次未改动任何协议常量，也未改动 NAS / 服务器配置。
+
+### 2026-11-12 · v3.22.11（#159） · 掉线后无法自愈：补上 QQ 重登与登录失败兜底
+
+**问题**：账号跑两天左右就掉线，并且一直离线；老版本能连着好几天在线。先分两件事查：掉线本身是代码问题还是登录协议过期。
+
+**协议核对（结论：协议是新的，不需要更新）**
+
+- 本地 `DEFAULT_CLIENT_VERSION` / `DEFAULT_WX_CLIENT_VERSION` = `1.16.3.8_20261028`，TSDK 为 `v3.9.0.1793764291`（微信 `v3.9.0.1793763796`），WASM SHA-256 与官方包一致。
+- 对照上游 `liyangpengs/qq-farm-bot`（2026-11-12 仍在提交）与镜像 `muyuewang/qq-farm-bot-404`（2026-11-10）：两者的客户端版本号、TSDK 版本、WASM 校验值与本地完全相同，没有更新的协议可用。11-12 的上游提交只是奶茶弹窗的样式改动，不涉及登录链路。
+- 协议过期会「直接登录失败（HTTP 400 / 版本不符）」，不会先正常在线两天再掉，所以症状形态也对不上协议失效。
+
+**代码侧根因（掉线是触发，回不来才是缺陷）**
+
+- **掉线重登只对微信生效**：`wx-keepalive.notifyAccountOffline` 的准入条件是 `hasWxCredential()`（`platform === 'wx'` 且有 `wxid + refreshtoken`），QQ 账号掉线后连「尝试重登」都不会发起，只能人工点启动。这是「掉线后一直离线」最直接的原因。
+- **登录失败直接杀进程**：`network.ts` 的 `sendLogin` 遇到 `code=` 错误走 `process.exit(0)`，而 worker-manager 的 `exit` 分支不会 `reportAccountOffline`，主进程根本收不到掉线信号，自然也不会补 Code 重登。一次性 Code 被消费、Code 过期、版本不符都会落到这条路上。
+- **掉线重登默认关闭**：`autoCodeRefresh.offlineEnabled` 默认 `false`，且归一化只看 `=== true`，老配置里没有该字段时也是关的。对「已经掉线的账号」来说这是纯自愈动作，默认关闭等于把恢复能力关掉了。
+- **QQ 重签能力判定过严**：`qq-credential` 把所有 `ok:false` 与 `LOGIN_REQUIRED` 都当成「服务不支持免扫码重签」并永久停止探测，NapCat 里 QQ 掉登录后即使重新登录也不会再试。
+
+**改动**
+
+- `core/src/services/wx-keepalive.ts`：新增 `platformOf` / `canRecoverAccount` / `refreshCredentialFor`，把「能否免扫码恢复」作为唯一准入条件 —— 微信看滚动凭证，QQ 看 NapCat 重签是否可用；`refreshAndMaybeRestart` 按平台选择 `refreshAccountCredential` 或 `tryRefreshQqGameCode`，成功后统一用新 Code 重启。新增掉线重登次数闸门 `reserveReconnectSlot`：一小时窗口最多 5 次，超了暂停 30 分钟（暂停期满重新起一轮额度），避免 Code 永久失效时每 60 秒重登一次刷屏、反复打续期接口；没有可恢复凭证时直接写清「需重新扫码」。所有尝试写入账号日志（`auto_reconnect` / `auto_reconnect_paused`）。
+- `core/src/core/worker.ts` + `core/src/utils/network.ts`：登录失败不再 `process.exit(0)`，改为 `finalizeConnection({ source: 'login_failed' })` + terminate，走正常断线收尾，让主进程按平台补 Code 后重登。
+- `core/src/runtime/worker-manager.ts`：新增 `DISCONNECT_SOURCE_LABELS`，断线与踢下线的账号日志直接写中文原因（服务端关闭连接 / 连接被拒绝 / 登录验证失败 / 心跳超时…）并带关闭码，下次掉线不用再翻英文 `source` 猜原因。
+- `core/src/services/qq-credential.ts`：`LOGIN_REQUIRED` 移出「服务不支持」永久名单（NapCat 掉登录是可恢复状态）；只有明确的能力/鉴权类错误才停止探测；临时 5xx 与网络异常不再永久禁用自愈。新增导出 `isQqCodeRefreshConfigured()`。
+- `core/src/config/config.ts`、`web/src/stores/setting.ts`、`web/src/components/settings/AccountKeepAliveCard.vue`：掉线重登默认开启；归一化只把「明确保存过的 false」当作用户主动关闭，缺省按开启处理。
+- 未改：心跳阈值（25 秒 tick / 3 次漏拍 / 60 秒极端静默）、Code 一次性不重放、扫码工作流，以及微信到期前预防性续期（仍常开、每 2 小时小幅重启一次以滚动 token）。
+
+**验证**：新增 `core/tests/qq-credential-refresh.test.js`（5 条：未配置、重签成功、明确不支持、NapCat 未登录可恢复、网络异常不永久禁用）；`core/tests/code-preflight.test.js` 扩到 25 条（QQ 掉线重签、失败不重启、限流与暂停、窗口滚动、登录失败不再杀进程、准入条件改为平台无关）。core **587→598**、web **215/215**、`pnpm lint` 0、`build:ts` / `vue-tsc -b` / `vite build` 全过。
+
+**边界**：QQ 的免扫码重签依赖 NapCat 侧 `/miniapp` 能力与当前 QQ 会话，标准 `qq-miniapp-auth` 不支持，这类账号仍只能重新扫码（日志会写明原因）；掉线触发原因（服务端关闭连接 / 心跳静默 / 网络抖动）本次只增强可见性，没有伪造握手或修改网关参数。
+
+### 2026-11-12 · v3.22.10（#158） · 全仓完整性复查：修复统计基线、登录初始化与若干判定缺陷
+
+再次按「整个代码完整性」做只读审计（4 个只读子代理分模块扫描 + 逐条回源码核实），确认并修复以下真实缺陷；对需要协议行为或产品口径才能定性的条目，核实后不盲改。
+
+- **今日统计基线被 null 误恢复成 0（最要紧）**：`stats.ts` 同日重启恢复当天基线时，`Number(null) === 0` 会通过 `>= 0` 检查，把跨天清空的 `gold/exp/coupon` 基线恢复成 0，导致「今日金币/经验/点券」直接显示成整个账户余额（金豆那段早已显式排除 null 并留了注释，金币三条是漏改的同型缺陷）。抽出 `restoreInitialBaseline()` 统一排除 null/undefined。
+- **登录成功的连接被附属初始化掐断**：`worker.ts` 的 `onLoginSuccess` 里 `initStatsWithPersistence / processInviteCodes / syncStatus` 等未包 try/catch，而 network 的 `sendLogin` 会把 `onLoginSuccess` 抛错当成「登录初始化失败」直接 finalize + terminate。任一附属步骤（统计落盘失败、邀请码接口抖动）都可能把刚登录好的健康连接杀掉，形成「登录成功→立刻掉线→重启」循环。改为逐段兜底 + logWarn（作者在 `runStartupSequence` 注释里已明说该风险，中段漏做）。
+- **2×2 催熟结果没带出返回值**：`planting.ts` 的 `runFertilizerByConfig` 只在 `multi_season && none` 分支返回 `size2` 计数，常规「2×2 催熟开 + 施肥 none/smart」下返回 0，scheduler 因此不立即收获刚催熟的地块（多等一轮约 20-25s，正落在最易被偷的窗口），日志也没有「2×2催熟」痕迹。改为统一返回 `fertilized + size2`；并给 smart 有机目标补上排除 2×2 主地块，避免重复施肥。
+- **出售数量在 gold=0 时漏记**：`worker.ts` 的 `onSellGain` 用 `sellInfo.gold || sellInfo`，gold 为 0 时回落成对象、`Number(obj)` 得 NaN 直接 return，`recordOperation('sell')` 丢失。改为只认 `count`。
+- **调度器旧 interval 任务改写新任务状态**：`scheduler.ts` 的 `setIntervalTask` finally 只用 key 取 entry，任务被 clear 后重建（如保存配置重建神秘商店定时器）时，仍在跑的旧 runner 会把新 entry 的 `running` 清掉、`nextRunAt` 覆盖，导致防重入失效。补代际校验 `updated === entry`（`setTimeoutTask` 早已有同类校验）。
+- **末季多季作物被误判仍在生长**：`land-analysis.ts` 的 `hasRemainingSeasons` 写成 `currentSeason > 1 || currentSeason < totalSeason`，前一项与「是否有剩余季」无关且恒把末季判真，导致异常阶段下的末季作物被当 growing（跳过铲除、还对其补肥）。改为 `currentSeason < totalSeason`。
+- **有机肥目标混入成熟地块**：`getOrganicFertilizerTargetsFromLands` 只排除枯死、不排除成熟（普通肥版本已排除），成熟地块排在前面会让「第一块不能施」中断整轮有机肥。补 MATURE 排除。
+- **神秘商店缺字段被当有效商品**：`decideMysteryShopTick` 用 `Number(npc.reward.count) <= 0` 判无效，字段缺失时 `NaN <= 0` 为 false，会被当成有效商品继续下单。改为 `!(Number(...) > 0)`。
+- **图鉴自动化一次失败吃掉一整天**：`illustrated-auto.ts` 在干活前就把 `lastRunDate` 置成今天，`getSnapshot`/`getBagSeeds` 抛错后当天后续调用全返回 `same_day`。改为真正跑完才标记，基础设施失败可当天重试。
+- **`/api/automation` 空 body 500**：`farm-routes.ts` 直接 `Object.entries(req.body)`，`Content-Type` 不匹配时 `req.body` 为 undefined → TypeError → 500。补请求体守卫，空配置返回 400。
+- **前端三处**：好友土地请求序号原来是全账号共享计数器，「展开 A 后立刻展开 B」会把 A 的结果丢弃且 A 的 loading 永真 → 改为按好友维度（Map）；账号列表请求失败不再清空 `accounts`/`currentAccountId`（原来一次超时就会静默把选中账号重置成第一个）；活动倒计时新增未知 state 的兜底文案（原会渲染成 `undefined`）。
+
+核实后未改（避免盲改）：`mall.ts`/`pet-feed.ts` 读 `getUserState().ticket` 恒为 0，但商城商品计价币种是动态的 `goods.price.id`，不是固定点券，简单换成 `coupon` 会在币种不同时误暂停购买，留待「按币种取背包余额」的方案；`pet-feed` 自动买礼包失败后提前 return（与开关关闭分支语义不一致，属产品取舍）；`email` 批量领取回包被丢弃与 `nextCheckAt` 服务器分钟/本地毫秒混算；`task` 图鉴用点券差值 ≥200 判成功；`network` 登录业务错误码直接 `process.exit(0)` 不上报（涉及连接生命周期，改动面大）。
+
+验证：core **575→587**（+12）、web **212→215**（+3）、`pnpm lint` 0、core `build:ts`、`vue-tsc -b`、`vite build` 全过。
+
+### 2026-11-12 · v3.22.9（#157） · 成熟唤醒与活动/好友成熟计划的时间基准修正
+
+再次按「整个代码完整性」做了一轮只读审计，重点核对 v3.22.8 新增的「自家农场成熟驱动唤醒」链路与全仓其它时间计算路径。发现并修复三处同一根因的缺陷：把「服务器时间」和「本地 Date.now()」混用做时长 / 延迟计算，一旦本机时钟与服务器时钟不一致（项目本就为这种偏移维护了 syncServerTime），唤醒线或开关节点会被错算。
+
+- **自家成熟延迟按服务器时间计算（最要紧）**：`own-maturity.ts` 的 `getOwnFarmMaturityDelayMs` 原来用 `matureAtSec*1000`（服务器时间戳）去减本地 `Date.now()`，算出「还要等多久」。服务器比本地快 30 秒时，本应 10 秒后收的菜会被算成还要等约 40 秒，唤醒点跟着漂。现在改成纯服务器时间差 `(matureAtSec - getServerTimeSec())*1000`，与好友成熟计划 `nowMs + (matureAt - nowSec)*1000` 同一口径；`worker.ts` 调用处同步去掉已无意义的本地 nowMs 入参。
+- **活动开放判定按服务器时间**：`activity-automation.ts` 的 `isActivityOpen` 在 DTO 不带 active 字段、只能按 endTime 兜底判定时，用了 `Math.floor(Date.now()/1000)`（本地秒），而同文件 `buildActivityWindowGate` / `rescheduleActivityEventTimers` 都按 `getServerTimeSec()`。青酿 / 七夕 / 公益等活动的开放与关闭边界因此会按本机时钟算，可能向已关闭活动发请求或漏领。改为 `getServerTimeSec()`。
+- **好友成熟计划的过期清理按服务器时间**：`maturity-plan.ts` 的 `pruneExpiredPlans` 把服务器秒级的 `plan.matureAt` 和调用方传入的本地 `Date.now()`（nowMs）混在一起比，其余全部成熟数学（findNearestFutureMaturity / getNextStealDelayMs / observeFriendSummary 的 matureAt 比较）都正确用服务器时间。改成用 `getServerTimeSec()` 折算，调用方不再把本地 nowMs 喂进去。
+
+补的回归测试：
+- `core/tests/farm-scheduler-enhancements.test.js` 新增一条**真跑**用例：用 `syncServerTime` 把服务器时钟模拟得比本地快 30 秒，注入一个「服务器视角 10 秒后成熟」的墙钟，断言 `getOwnFarmMaturityDelayMs` 返回约 10 秒而非约 40 秒，锁死时间基准。
+- `core/tests/maturity-plan.test.js` 新增一条结构锁：源码不再出现 `plan.matureAt * 1000 <= nowMs - DUE_GRACE_MS`，必须是 `nowSec * 1000 - DUE_GRACE_MS`。
+- `core/tests/activity-automation.test.js`（新文件）新增一条结构锁：`isActivityOpen` 体内不再用 `Math.floor(Date.now()/1000)`，必须出现 `getServerTimeSec()`。
+
+审查中另有两项**存疑、未改**：
+- `commerce.ts` 的 `purchaseMysteryOffer` 购买成功后的确认判断里，`reward.count` 来自静态的 `npc.reward_count`，购买并不递减它，所以「`shop.npc.reward.count >= offer.reward.count`」在买成功后仍为真，理论上每次成功购买都会被判「未确认」并抛错、购买历史也写不进去。但这一判据真正能否触发取决于神秘商人购买后 `is_active` 是否翻转——这是协议回包层面的行为，本机无法验证，盲改购买路径风险更高，因此本次不动，仅标记为待线上确认。
+- `capital-mode.ts` 的 `findNearestMatureSeconds` 用 `toTimeSec(begin_time)` 取成熟点。`toTimeSec` 只做毫秒→秒归一、不处理相对倒计时，若服务端对 phase 的 `begin_time` 下发相对值会被当成绝对时间戳。但全仓 `land-analysis.ts` / `ripen-all.ts` / `reservation-window.ts` 都用 `toTimeSec(begin_time) - getServerTimeSec()` 这一绝对时间口径，属既有统一约定，故不改（避免破坏既有正确假设）。
+
+验证：core 575/575（较上轮 +3，来自新增回归用例）、web 212/212（web 未改动，沿用上轮基线）、`pnpm lint` 0 警告、core `build:ts` 全过。服务器 / NAS 环境配置未改动；这些改动要在 NAS 生效仍需走一次一键更新重新构建。
+
+### 2026-11-12 · v3.22.8（#156） · 自家农场成熟驱动唤醒与农场调度健壮性补强
+
+把上一轮只读分析里点名、当时按「没要求就不改」留着的增强项全部落地，另外清掉工作树里唯一的未跟踪文件。行为上只让巡查更及时、更不容易被卡住，没有改任何开关语义、协议请求或数据落盘。
+
+- **自家农场改为成熟驱动唤醒（最要紧）**：以前只有好友偷菜按成熟时刻动态排程，自家农场永远是 20~25 秒随机轮询，作物熟了平均还要白等十几秒。现在新增 `own-maturity.ts`：每轮整片土地快照用与好友成熟计划同口径的 `phase=6 / phase_id=19` 的 `begin_time` 算出下一块作物的成熟墙钟（兼容绝对秒 / 毫秒 / 相对倒计时），土地变更推送也参与观察但只收紧、不清空；`worker.ts` 的 `planNextFarmRun` 把下一次到期线取 `min(常规间隔, 成熟点 + 1.5 秒缓冲)`。成熟点过了 90 秒仍没被刷新就作废，避免一次没收成的旧墙钟把唤醒永久钉在最小值。
+- **配置下发不再「叫不醒」农场线**：统一调度器模式下 `refreshFarmCheckLoop(200)` 会因为 `scheduleNextFarmCheck` 直接 return 而什么也不做，面板保存配置后农场要等满 20~25 秒。现在该分支登记一次唤醒请求，`resetUnifiedSchedule` 与农场 tick 结束都统一走 `planNextFarmRun`，有请求就把到期线拉到 200ms 后。巡查中攒下的推送、收获失败、整轮超时也走同一条「尽快补跑」通道，一分钟内最多 3 次，防止推送风暴把常规节奏改成 1 秒空转。
+- **两类土地推送不再互相挤掉**：原先土地变化与农场社交事件共用一个 `lastPushTime`，还共用一个 `farm_push_check` 计时器名（`setTimeoutTask` 同名会先清掉旧计时器），同时到达时后者会把前者的检查整个抹掉。现在拆成两条独立的节流时间戳与两个计时器名；巡查进行中或计时器落地时撞上巡查的推送不再无声丢弃，改为记脏标记，等本轮结束立刻补跑一轮。
+- **自动化锁补优先级与排队超时**：`automation-lock.ts` 由 Promise 尾链改为显式等待队列，串行语义与「持锁内联 / detached 重新排队」完全不变，但农场巡查与推送补跑可以带 `priority` 插到所有低优先任务之前（不打断正在执行的任务），不再被排队中的卖果、活动自动化等长任务挡住；`timeoutMs` 只管「排队等锁」这一段，超时就跳过本轮并记日志（30 秒节流），已经开始执行的任务不受影响。
+- **整轮软预算与失败快速重试**：自动巡田带 5 分钟整轮预算，在种植、解锁升级、巡田施肥三个阶段的边界检查，超预算就停在边界、剩余动作交下一轮并登记补跑，不让一次慢请求或长施肥循环无限期占住链路；`Harvest` 失败被 catch 吞掉后本轮不铲不种，现在同样登记一次补跑，1 秒级重试而不是等 20~25 秒。
+- **工作树清理**：`qq-farm-bot/.workbuddy/` 里那份本机工作日志副本此前未跟踪、也没被忽略，现在在 `.gitignore` 加 `.workbuddy/` 规则。文件本身保留不删，只是不再出现在 `git status`、也不会被误提交或带到 NAS 的 `git pull` 工作区。
+- **回归测试**：新增 `core/tests/farm-scheduler-enhancements.test.js` 20 条，其中成熟墙钟归一化 / 最近成熟点 / 计划收紧与作废 / 补跑限流、`planNextFarmRun` 四种到期线（vm 沙箱注入桩真跑）、锁的优先级插队与排队超时、超时后队列仍可用都是**真实执行**，其余为防止改回旧写法的结构锁（两条到期线都走 `planNextFarmRun`、两类推送各自节流、脏标记、external 模式唤醒、三处预算检查等）。
+- **验证**：core 572/572、web 212/212、`pnpm lint` 0 警告、core `build:ts`、`vue-tsc -b`、`vite build` 全过。服务器 / NAS 环境配置未改动；这些改动要在 NAS 生效仍需走一次一键更新重新构建。
+
+### 2026-11-12 · v3.22.7（#155） · 全仓完整性检查：修复六处影响统计与农场自动化的缺陷
+
+对仓库做了一轮完整性体检：全量测试、lint、三个构建先跑基线（全绿），再分两路只读审查核心调度链与其余模块，逐条核实到代码行后只修确认的缺陷，不采纳风格建议与误报。共修复六处，另补一处可观测性改进。
+
+- **金豆当日基线会被占位 0 钉死（最要紧，上一轮改动引入）**：登录时若背包 `getBag` 失败或返回里没有 1005 项，`userState.goldBean` 仍是初始 0；金豆基线按「首次观测」初始化就会把 0 当成今日起点，等 `ItemNotify` 把余额刷成真实值（如 600），首页今日统计会显示 `+600`，把全部余额算成今日净增，且错误基线会被写进存档、同日重启一直错。现在 `initStatsWithPersistence` 增加第 5 个参数：背包同步成功才用登录余额（含合法的 0）作基线，失败传 `null`；基线为 `null` 时净增按 0 显示，只有观测到有效余额（`> 0`）才起算；`doSave` 写的是 `null` 而非 0，同日重启不会被脏基线污染。前端四张卡片与显示逻辑一行未改。
+- **铲除后服务端快照覆盖开场空地，导致整轮不种**：`autoPlantEmptyLands` 里 `landsToPlant = analyzeLands(latestLands).empty` 是覆盖而非合并，铲除后的回包只要「成功但滞后」（返回空数组或缺少开场已有空地），就会把已知真实空地抹成 0，直接 `return { plantedLands: [] }`；而收获后几乎每轮都会走这条路径。现在改为并集合并（只能补充新释放地块、不能反向删减），抽成可测试的纯函数 `mergeConfirmedEmptyLands`，按地块 id 归一化去重；空快照与异常一样只保留开场空地，连 `knownLands` 的土地类型映射也不再被清空。
+- **分次种植续跑被清掉后没有接回**：`checkFarm` 开头无条件 `clear('farm_plant_continue')` + `deferred=false`，而 finally 只在本轮真正走到种植引擎、`deferred` 被重新置 true 时才重排。异常、网关让路、空 lands 快照、代次变更等提前退出路径都会把续跑丢掉，剩余空地只能等下一次 20~25 秒常规巡查。现在记录进入本轮时是否有待触发续跑，配合 `plantingResolved` 标记，只在「本轮没走到种植决策」时按原剩余间隔接回；剩余间隔为 0 或代次已变则不重排，避免 0ms 空转与串账号。
+- **网关退避可无限期饿死农场巡查**：慢网关（心跳时好时坏、持续 5~20 秒慢请求）会让健康闸门长期为 false，`nextBusinessTickDeferMs` 每轮 30s→60s→60s 覆盖到期线，没有次数与累计上限，而前台让路本来就有 5 次上限。现在补上「连续 5 次或累计推迟 5 分钟」双上限，到顶强制照常跑一轮并重置计数（由 `checkFarm` 内部请求超时兜底），网关恢复、配置重置、停机时一并清零计数；农场与好友两条线独立计数。
+- **农场整轮异常被空 catch 静默吞掉**：`runFarmTick` 的 `catch { // ignore }` 让任务领取、礼包等 helper 永久失效时面板毫无异常。现在改为记录一条带 `result:'error'` 的告警，`finally` 复位逻辑不变。
+- **任务推送 debounce 绕过防重入锁**：`taskInfoNotify` 的 1 秒 debounce 直接跑 `claimTasksFromList`，不检查也不设置 `checking`，可与农场巡查的 `checkAndClaimTasks` 并发领取同一批任务，重复发起 `ClaimTaskReward` 并把 `taskClaim` 计数算重。现在 debounce 与巡查共用同一把锁，`try/finally` 保证复位。
+- **另补一处可观测性**：面板通知读取失败仍按原设计降级为空列表（返回结构不变，不破坏前端），但不再静默，记一条带 `result:'error'` 的日志。
+
+审查中另有几项经核实后**未改**：预检统计 / 微信保活固定 UTC+8 换日是注释写明的有意口径；今日统计前端四张卡片的数值计算本身无缺陷；土地变更推送在巡查中丢弃属于现有设计取舍（补脏标记属增强，改动面大，留待后续）；「测试只做文本匹配」是覆盖缺口而非当前故障，本次已为修复的关键逻辑补上真跑用例。
+
+- **回归测试**：新增 `core/tests/farm-defect-fixes.test.js` 11 条，其中空地合并与网关退避是**真实执行**抽出的逻辑（vm 沙箱注入状态，验证 30s→60s 封顶、第 6 次强制探活、累计上限、恢复清零、双线独立），其余为防回退的结构锁；`core/tests/today-stats-gold-bean.test.js` 新增 4 条真跑用例（背包同步失败不钉死基线、脏存档写 null、合法 0 基线、登录直接传基线）；`web/tests/today-stats-bean-coupon.test.mjs` 的静态锁同步到新实现并新增后端/前端双向断言。
+- **验证**：core 552/552、web 212/212、`pnpm lint` 0 警告、core `build:ts`、`vue-tsc -b`、`vite build` 全过。
+
+### 2026-11-12 · v3.22.6（#153） · 修正调度器注释与清理帮忙间隔的无效配置读取
+
+排查自动化运行节奏时发现的两处代码自洽问题，均不改变实际行为。
+
+- **注释与实现脱节**：`core/src/core/worker.ts` 组装 `fullStats.nextChecks` 处的注释仍写着「好友帮忙与偷菜在同一轮好友巡查里一起做」，但帮忙与偷菜早已拆成两条独立到期时间线（`runFriendTick` 固定 10 分钟一轮，`runStealTick` 按好友作物成熟时刻动态唤醒）。注释改为如实描述两条线的取数来源与开关各自独立，避免后人按错误模型改倒计时。
+- **永远不生效的间隔字段**：`runFriendTick` 原先读取 `workerConfig.helpCheckIntervalMin/Max`，这两个字段从未在 `applyIntervalsToRuntime` 里赋值，全靠兜底值算出 30~35 秒随机数，而该值每轮都被 `Math.max(10 分钟, …)` 丢弃，属于死代码。这里没有补赋值（补了只会制造「帮忙间隔可配置」的假象，因为 10 分钟下限仍会吃掉它），而是删掉这段无效计算，把 10 分钟提为命名常量 `HELP_TICK_INTERVAL_MS`，并在注释里说明设计原因。首次启动的到期窗口仍由可配置的 `friendCheckIntervalMin/Max` 决定（30~35 秒），这条链路未动。
+- **回归锁**：`core/tests/unified-scheduler-regressions.test.js` 新增两条，分别锁住「帮忙固定 10 分钟且全文件不再出现未赋值字段、首次到期窗口仍可配置」与「`nextChecks` 注释不再宣称同一轮巡查、两条到期线各自推进」。
+
 ### 2026-11-12 · v3.22.5（#152） · 回滚 README 的 Docker 部署命令补全，恢复精简安装说明
 
 应要求撤销上一次更新（v3.22.3 · #151）的内容改动。
