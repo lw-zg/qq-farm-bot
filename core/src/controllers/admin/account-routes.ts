@@ -10,6 +10,8 @@ const store = require('../../models/store');
 const { addOrUpdateAccount, deleteAccount } = store;
 const { findAccountByRef } = require('../../services/account-resolver');
 const { toPublicAccountsData } = require('../../services/account-visibility');
+const { parseLogLimit, mergeLogLists } = require('../../services/log-query');
+const { clearAccountRuntimeState } = require('../../services/account-runtime-state');
 const { getPreflightStatsSnapshot } = require('../../services/preflight-stats');
 const { updateRuntimeConfig, getRuntimeConfig, getDefaultSystemConfig, getDevicePresets, getTimeZoneOptions } = require('../../config/config');
 
@@ -38,11 +40,14 @@ function mountAccountRoutes(app: Application, ctx: AdminContext): void {
     app.get('/api/accounts', (req: Request, res: Response) => {
         try {
             const data = ctx.provider.getAccounts();
-            // 只把「能否免扫码续期」的判定结果发给浏览器，不下发长效凭证明文。
-            // 判定口径与 wx-keepalive 一致：wx 账号 + wxid + refreshtoken 三者齐备。
+            // 只把「能不能免扫码恢复」的判定结果发给浏览器，不下发长效凭证明文。
+            // 两个口径都要发：wxPreflightSupported = 能滚 token（wxid + refreshtoken），
+            // wxCanRecover = 掉线后能免扫码换 Code（再加上只有 loginBuffer 的情况），
+            // 后者与 wx-keepalive 的 canRecoverAccount 完全同一个函数。
             // 同时附带自动续期账本快照（仅时间戳与次数），供卡片显示无人值守结果。
             const { hasWxCredential } = require('../../services/wx-credential');
-            res.json({ ok: true, data: toPublicAccountsData(data, hasWxCredential, getPreflightStatsSnapshot()) });
+            const { canRecoverAccount } = require('../../services/wx-keepalive');
+            res.json({ ok: true, data: toPublicAccountsData(data, hasWxCredential, getPreflightStatsSnapshot(), canRecoverAccount) });
         } catch (e: any) {
             handleApiError(res, e);
         }
@@ -285,6 +290,9 @@ function mountAccountRoutes(app: Application, ctx: AdminContext): void {
             const target = findAccountByRef(before.accounts || [], req.params.id);
             ctx.provider.stopAccount(resolvedId);
             const data = deleteAccount(resolvedId);
+            // 账号已删除，状态账本里的记录也要一起摘掉：否则同 id 的账号重新
+            // 加回来时会先继承上一次的「已掉线 / 停止中」，面板闪一下错误状态。
+            clearAccountRuntimeState(resolvedId);
             if (ctx.provider.addAccountLog) {
                 ctx.provider.addAccountLog('delete', `删除账号: ${(target && target.name) || req.params.id}`, resolvedId, target ? target.name : '');
             }
@@ -297,7 +305,7 @@ function mountAccountRoutes(app: Application, ctx: AdminContext): void {
     // API: 账号日志
     app.get('/api/account-logs', (req: Request, res: Response) => {
         try {
-            const limit = Number.parseInt(req.query.limit as string) || 100;
+            const limit = parseLogLimit(req.query.limit);
             let list: any[] = ctx.provider.getAccountLogs ? ctx.provider.getAccountLogs(limit) : [];
             if (!Array.isArray(list)) list = [];
 
@@ -315,9 +323,9 @@ function mountAccountRoutes(app: Application, ctx: AdminContext): void {
         // 如果没有指定账号ID，获取所有账号的日志
         if (!id) {
             const accountIds = getAccountIds(ctx);
-            const allLogs: any[] = [];
+            const perAccountLogs: any[][] = [];
             const options = {
-                limit: Number.parseInt(req.query.limit as string) || 100,
+                limit: parseLogLimit(req.query.limit),
                 tag: req.query.tag || '',
                 module: req.query.module || '',
                 event: req.query.event || '',
@@ -330,20 +338,19 @@ function mountAccountRoutes(app: Application, ctx: AdminContext): void {
             for (const accId of accountIds) {
                 const logs = ctx.provider.getLogs(accId, options);
                 if (Array.isArray(logs)) {
-                    allLogs.push(...logs);
+                    perAccountLogs.push(logs);
                 }
             }
 
-            // 按时间排序并限制数量
-            allLogs.sort((a: any, b: any) => (b.time || 0) - (a.time || 0));
-            const limitedLogs = allLogs.slice(0, options.limit);
+            // 按时间升序合并，再取最新的 limit 条（与单账号分支 slice(-limit) 的朝向一致）。
+            const limitedLogs = mergeLogLists(perAccountLogs, options.limit);
 
             return res.json({ ok: true, data: limitedLogs });
         }
 
         // 指定了账号ID且通过权限检查，返回该账号的日志
         const options = {
-            limit: Number.parseInt(req.query.limit as string) || 100,
+            limit: parseLogLimit(req.query.limit),
             tag: req.query.tag || '',
             module: req.query.module || '',
             event: req.query.event || '',

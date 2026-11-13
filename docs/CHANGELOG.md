@@ -15,6 +15,20 @@
 
 | 版本 | 更新序号 | 日期 | 更新内容 | 提交 |
 | --- | --- | --- | --- | --- |
+| v3.25.9 | #178 | 2026-11-14 | 测试不再往真实数据目录扔临时文件 | — |
+| v3.25.8 | #177 | 2026-11-14 | 修复 Windows 上原子写偶发 EPERM 导致配置与当日状态丢失的问题 | — |
+| v3.25.7 | #176 | 2026-11-14 | 修复单个 HTTP 请求可打死主进程的问题，并补上真实冒烟与前端逻辑测试 | — |
+| v3.25.6 | #175 | 2026-11-14 | 补齐剩余 5 个零测试模块的 67 条测试，并修掉两处同类边界问题 | — |
+| v3.25.5 | #173 | 2026-11-14 | 为 8 个零测试的高风险模块补 123 条测试，并修复好友 GID 归一化放行 Infinity | — |
+| v3.25.3 | #172 | 2026-11-14 | 修复请求参数以 Infinity 绕过校验，并把外部输入面收成清单闸门 | — |
+| v3.25.2 | #171 | 2026-11-13 | 参数与边界复查：间隔上限缺失、定时器延时溢出、Infinity 放行与管理端口校验 | — |
+| v3.25.1 | #170 | 2026-11-13 | 重构切号竞态：27 处手写序号计数器全部收口到统一请求守卫 | — |
+| v3.25.0 | #169 | 2026-11-13 | 新增防复发门禁：把「未处理 Promise」这类反复出现的问题变成写的时候就报错 | — |
+| v3.23.8 | #168 | 2026-11-13 | 全仓完整性复查（第四轮，含前四轮回归）：修复进程致命拒绝、启动失败卡死与切号串数据 | — |
+| v3.23.7 | #167 | 2026-11-13 | 修复账号运行状态从不更新：补齐后端状态机，登录中 / 等待重登 / 停止中终于可见 | — |
+| v3.23.6 | #166 | 2026-11-13 | 全仓完整性复查：修复「全部账号」日志排序失效、停机不清活动主循环与巡检周期被反复重置 | — |
+| v3.23.5 | #165 | 2026-11-13 | 全仓完整性复查：修复统计跨日错位、好友帮忙自锁与 2×2 预留组误释放 | — |
+| v3.23.3 | #163 | 2026-11-13 | 全仓完整性复查：修复凭证吊销闸门失效、续期窗口被推迟与续期异常打断主进程 | — |
 | v3.23.2 | #162 | 2026-11-13 | Docker Hub 直连超时时，NapCat 镜像改用加速站或本地标签 | — |
 | v3.23.1 | #161 | 2026-11-13 | QQ 取码链路收口：优先 getOpenAuth，NapCat 基础镜像补固定版本与离线导入路径 | — |
 | v3.23.0 | #160 | 2026-11-13 | 移植 YYB-Go-Enhanced 完整保活方案：会话复用、错误分级与只滚令牌续期 | — |
@@ -170,6 +184,212 @@ flowchart TB
 ```
 
 ## 详细记录
+
+### 2026-11-14 · v3.25.9（#178） · 测试不再往真实数据目录扔临时文件
+
+- **怎么发现的**：清点 `core/data` 时看到一堆 `test-email-XXXXXX/` 目录，共 27 个。查下来只有 `email-daily-persistence.test.js` 的测试脚手架把临时目录建在 `core/data` 下（`mkdtempSync(path.join(dataRoot, 'test-email-'))`），其余测试都建在系统临时区。
+- **为什么会累积**：清理写在 `t.after` 里，但 Windows 上 `fs.rmSync` 遇到仍被打开的文件会抛 `EPERM`/`EBUSY`，`force: true` 并不重试——一次清理失败就永久留下一个目录。这和上一轮修的 `rename` 是同一种锁文件现象。
+- **修法**：脚手架改到 `os.tmpdir()/qq-farm-email-tests`；所有测试的清理统一加 `maxRetries: 5, retryDelay: 50`（`rmSync` 原生支持，就是给 Windows 这种瞬时占用准备的）。已存在的 27 个残留目录一并清掉。
+- **顺带修正一次误判**：清点时以为 `data/store.json` 和 `data/tsdk` 是测试新产生的，查时间戳是 11 月 3–5 日——本来就存在，是我前面用 `ls | head -12` 把输出截断了。**用截断的输出判断「文件是新出现的」是不可靠的**。
+- **验证**：`pnpm verify` 全绿（core 925 / web 273），跑完 `data/` 下不再新增 `test-email-*`。
+
+### 2026-11-14 · v3.25.8（#177） · 修复 Windows 上原子写偶发 EPERM 导致配置与当日状态丢失的问题
+
+- **起点是一次「偶发红」的测试**。上一轮提交后复跑，`email-daily-persistence` 里那条「已取得检查失败结果时，当天重启也不会重复检查」偶尔失败——单独跑 6 次全绿，只跑全量时 4 次里红 2 次。它断言的是「重启后能读到当天 `result: 'error'`」，实际读到空字符串。
+- **顺着症状查到唯一可能的路径**：状态文件在写完后仍留着 `running`。`finishAttempt()` 是同步写盘的，唯一能让它没落地的原因是 `persistState()` 返回 false —— 也就是 `writeTextFileAtomic` 抛了异常。异常被吞掉、只把 `lastError` 加了个后缀，所以表面上「检查失败了」，实际上状态没存。
+- **实测确认了根本原因**（本机 Windows）：只要目标文件被**另一个进程持有读句柄**，`fs.renameSync` 覆盖它就 **200/200 稳定报 `EPERM`**；放开句柄后 200/200 成功。这不是测试环境特有的——杀毒软件、Everything、OneDrive/坚果云同步、编辑器预览都会短暂持有句柄，于是「刚改完的设置重启后没了」「当日统计丢了」这类问题会偶发出现、且无法复现。
+- **量化了一下影响面**：写一个子进程反复占用同一个文件（每 20ms 打开、持有 8ms），主进程连写 60 次——**不重试时失败 22 次（37%）**，加重试后 **60/60 全成功**。
+- **修法**：在 `json-db` 里抽 `renameWithRetry()`，只对 `EPERM` / `EACCES` / `EBUSY` 做有限次退避重试（10/20/40/80/160ms，用 `Atomics.wait` 睡，不烧 CPU），其它错误（磁盘满 `ENOSPC`、路径不存在）**立刻抛出**——不能被重试掩盖。`writeTextFileAtomic` 与 `services/stats.ts` 各自那份原子写都改用这一个实现（同一个概念原来写了两遍）。
+- **诚实的边界**：修复后连跑 9 轮（含高负载 4 个 CPU 占满进程）都没再复现那次偶发，而且探针显示**真实的邮件状态写入路径一次重试都没有触发** —— 所以「这就是那次偶发的原因」**没有被完全证实**，只能说它是唯一能产生该症状的路径，而且这条路径上的脆弱性已经被实验量化并修复。
+- **新增测试** `core/tests/json-db-atomic-write.test.js`（6 条）：`EPERM` 重试后成功、`EBUSY`/`EACCES` 同样重试、`ENOSPC` 只尝试一次且不等待、重试耗尽后抛出且**不留下临时文件**、真实持有句柄场景下文件必须始终是完整 JSON（不能写出半截）。
+- **验证**：`pnpm verify` 全绿（core 919 → **925**、web 273、lint 0、类型检查 0）。
+
+### 2026-11-14 · v3.25.7（#176） · 修复单个 HTTP 请求可打死主进程的问题，并补上真实冒烟与前端逻辑测试
+
+- **这轮第一次真的把服务启动起来发请求**。之前 915 条单测全是 mock 出来的，从没验证过 Express 能不能跑、路由挂没挂上、错误处理是不是 500 —— 这些都是单测的结构性盲区。做法是写一个冒烟脚本：用 `node -r` 预加载把**可写数据目录整体重定向到临时目录**（`runtime-paths` 在 require 阶段就被 logger、`KNOWN_FRIEND_GIDS_DIR`、`admin.json` 用到，事后改来不及），再真实启动 admin 服务，打 50 多个接口（鉴权、只读、写、非法参数、路由边界、账号解析）。跑完核对过 `core/data` 的文件时间戳，全程没碰真实账号数据。
+- **第一个请求就把进程打死了**：`GET /api/friend-blacklist` 抛 `TypeError: friendsList is not iterable`，然后**整个进程退出**，所有账号一起掉线。原因有两层：
+  - `friendsList = await ctx.provider.getFriends(id) || []` —— `||` 只兜住 `null` / `undefined`，provider 返回对象（错误包或空响应）时原样赋值，后面的 `for...of` 就炸；
+  - 那段 `for...of` 在 `try` 之外，而 **Express 4 不捕获 async handler 的 Promise 拒绝** —— 拒绝变成 `unhandledRejection`，Node 默认直接结束进程。
+- **三层修复**：
+  1. **具体缺陷**：抽出 `readFriendsForDisplay()`，用 `Array.isArray` 显式判数组，非数组一律当空列表（两处调用点都改了）；
+  2. **系统性**：新增 `guardAsyncRoutes(app)`，在注册阶段把所有路由 handler 包一层——同步抛错和 Promise 拒绝统一转成 `next(err)`，再由新加的 JSON 错误中间件返回 500。**请求失败，但进程活着**，而且改动集中在一处，覆盖全部现有与将来的路由；
+  3. **兜底**：`client.ts` 装 `unhandledRejection`（只记日志不退出，主进程管着所有账号，不该因为一个请求的意外而全部掉线）与 `uncaughtException`（记录完整堆栈后退出，未知状态继续跑风险更大）。
+- **修复是靠注入验证过的，不是靠「看起来对」**：把数组判断改回 `|| []` → 冒烟测试报 500 `friendsList is not iterable`（不再崩溃）；在路由里注入一个 `try` 之外的 async 抛出 → 返回 500 `smoke-inject-outside-try`；**同时去掉守卫 + 同样的抛出 → 进程真的崩了**。三个注入把「bug 是真的」「守卫确实在救」「没有守卫就会崩」全部坐实。
+- **顺手补的一处边界**：`/api/farm/fertilize` 没校验化肥类型，而 `/api/farm/fertilize-all` 校验了 —— 同一个枚举两套行为，非法值要跑到 worker 里才报错。统一在边界返回 400。
+- **前端补了 25 条真逻辑测试**。前端原来只有「读源码做静态断言」，等于只验证代码长什么样、不验证算得对不对。用一个不依赖 Node 版本的加载方式（仓库自带的 typescript 转译 → `data:` URL 导入，避开只有 Node 22.6+ 才有的 `--experimental-strip-types`），覆盖数字缩写、化肥时间换算、互动道具可用性判定、一键催熟步进状态机。
+- **因此抓到一处显示 bug**：`formatGoldAmount(99999999)` 显示成 **`10000.00万`** —— `(99999999/10000).toFixed(2)` 正好进位到 10000.00，看着像坏了。改成进位成 `1.00亿`。边界值现在单调：9999.99万 → 1.00亿 → 1.00亿。
+- **另外探查后确认没问题的**：`number-format` 对 `Infinity` / `NaN` / `null` / 非法文本一律显示 0；`fertilizer-time` 的负数与非法值都归零、未知单位按秒处理（不会除零）；`interaction-item-rules` 的整张决策表（未解锁 / 枯萎 / 成熟 / 已生效 / 种子期 / 天工 / 多格 / 闪电变异）行为一致，`land` 为 `null` 也不崩。
+- **闸门**：`core/tests/admin-route-safety.test.js`（4 条）锁住守卫的注册位置（必须早于第一个路由挂载）、错误中间件必须在 SPA 兜底之后、`unhandledRejection` 分支里不许有 `process.exit`、冒烟预加载必须重定向数据目录；`web/tests/utils-logic.test.mjs`（25 条）覆盖上面四个模块。三个静态回退注入各被抓 1 条。
+- **冒烟脚本保留为手工工具**：`cd core && pnpm test:smoke`（默认端口 34567，可用 `SMOKE_PORT` 覆盖），不进 `pnpm test`，避免 CI 里抢端口。
+- **验证**：`pnpm verify` 全绿（core 915 → **919**、web 248 → **273**、lint 0、类型检查 0），冒烟 0 失败。
+
+### 2026-11-14 · v3.25.6（#175） · 补齐剩余 5 个零测试模块的 67 条测试，并修掉两处同类边界问题
+
+- **上一轮剩下的 5 个全部补完**：`services/analytics.ts`、`services/activity-windows.ts`、`services/dog-skill-gifts.ts`、`services/invite.ts`、`services/collections.ts`。至此 `core/src` 里除纯类型定义外的所有模块都有直接测试。
+- **`analytics`（作物效率排行）**：这模块只有一行导出，内部全是隐式换算约定。锁三个容易出错的地方——① 双季作物的**三个倍率是分开写的**（生长 ×1.5、经验 ×2、化肥减免 ×2），漏掉任何一个排行都会悄悄偏掉而数值看起来仍然合理；② 化肥减免可能大于总生长时间，除法必须有兜底，否则指标会变成 `Infinity`；③ 白萝卜（29999）是活动作物，必须排掉否则会长期占榜首。游戏配置整体替换成小样本，每个断言都能手算核对。
+- **`activity-windows`（活动时间窗口）**：自动出售判断「活动是否结束」全靠这份带 TTL 的缓存。锁的是**降级语义**——拿不到时必须返回 `activityWindowsLoaded: false`（下游一律判「不满足条件」= 宁可不卖），而不是假装加载过；刷新失败但已有旧缓存时继续用旧的、且不能自称已加载。另外锁并发去重（同时刻多个调用只发一次请求）与两个网络事件（`activitiesChanged` / `disconnected`）的失效行为。
+- **`dog-skill-gifts`（宠物技能礼包）**：价值在「不该发请求的时候不发」——没有待领礼包时调领取接口等于每个巡检周期白打一次网关；并发调用没去重会重复领同一批礼包。测试覆盖提示值优先（跳过状态查询）、`claimed_count` 缺失时用物品数量兜底、失败时是否透传错误、以及并发三次只领一次。
+- **`invite`（邀请码）**：这条链路只在微信环境生效，平时几乎跑不到，一旦跑起来就是批量发好友申请，所以边界比功能重要。顺手修了一处真实可用性问题：**`parseShareLink` 原来只认 `?uid=...` 这种纯查询串**，用户把整段分享链接（`https://.../?uid=...`）粘进 share.txt 时 `URLSearchParams` 会把 `https://.../?uid` 整体当一个键名，结果 uid 解析成 null、邀请被静默跳过。现在改成统一取问号之后的部分，两种格式都认。
+- **`collections`（蓝晶藏品，19KB）**：只锁结构性不变量、不硬编码配置数值（配置会变）。重点：未拥有时 `canUpgrade` 必须为假；满星时不能再标记可升星；顶层 `activatedCount`/`totalCount` 必须等于各系列之和；`currentBuffs` 只能来自**已领取**的里程碑（达到分数但没领不能给属性）；`display` 在 `item_id` 为 0 时必须为 null；参数校验（非法藏品编号、星级不在 0–4、展示开关不是布尔）必须在发请求之前抛 `INVALID_ARGUMENT`。
+- **又修一处同类边界**：`dog-skill-gifts` 的 `Math.max(0, toNum(x))` 对 `Infinity` 无效（`Math.max(0, Infinity)` 还是 Infinity），而这个待领数量会下发给面板——JSON 里 `Infinity` 会变成 `null`，界面显示空白。抽了个 `safeCount()`（必须是有限正整数，否则归零），三处调用点统一。
+- **测试有效性仍然靠缺陷注入验证**：9 个注入全部被抓——去掉双季 1.5 倍生长时间、去掉白萝卜排除、TTL 判定失效、空回包不报错、去掉礼包并发去重、去掉邀请按 uid 去重、`canUpgrade` 恒为真。其中「去掉 `starLevel < 5`」这个注入**没被抓到**，原因是满星时配置里本来就没有 6 星材料、`copiesNeeded` 为空，两个条件是重合的——换成「`canUpgrade` 恒为真」就被抓了 2 条。这条记下来：**注入的变异点必须真正改变行为，否则「没抓到」不代表测试无效**。
+- **踩坑**：① 替换 `runtime-paths` 模块时只给 `getShareFilePath`，把 `ensureDataDir` 也一起抹掉了，`logger` 加载即崩 —— 改成展开真实导出再覆盖单个函数；② `operateCollections` 是同步抛错（在返回 Promise 之前），必须用 `assert.throws` 而不是 `assert.rejects`；③ `share_cfg_id` 走 `toLong` 是 Long 实例，比较前要 `Long.fromValue(...).toNumber()`。
+- **验证**：`pnpm verify` 全绿（core 848 → **915**、web 248、lint 0、类型检查 0）。
+
+### 2026-11-14 · v3.25.5（#173） · 为 8 个零测试的高风险模块补 123 条测试，并修复好友 GID 归一化放行 Infinity
+
+- **补测试的清单怎么定的**：先做了一次覆盖率普查——`core/src` 159 个源文件里 141 个被测试直接引用，剩下 18 个没有。按「影响面 × 是否在主流程 × 最近是否出过事」筛出 8 个：`capital-mode`（宠物自动派狗）、`auth-security`（登录与锁定）、`admin/middleware`（鉴权与错误形状）、`friend/gid-manager`（好友 GID）、`config/sell-conditions`（出售条件）、`services/account-resolver`（账号解析）、`utils/request-context`（请求班次）、`models/store/gid-cache`（GID 磁盘缓存）。
+- **补测试之前先验证测试本身有效**：新写的测试一次全绿是最可疑的信号，所以对每个被测模块做了缺陷注入——手动改坏源码，确认测试真的会红，再复原并用哈希核对。资本模式注入 3 个（去掉失败分支的 `clearOwnership`、把 120 秒兜底改成 60 秒、去掉「只撤自己的狗」判断）全部被抓；GID 模块去掉 `isSafeInteger` 检查被抓 3 条。
+- **顺手修掉一个真缺陷：好友 GID 归一化放行 Infinity**。`normalizeFriendGids` 写的是 `toNum(item)` + `value <= 0`——`toNum(Infinity)` 仍是 Infinity，`Infinity <= 0` 是 false，于是 Infinity 被当成合法 GID 收下，最后走到 `toLong()`；实测 `Long.fromNumber(Infinity)` 等于 **9223372036854775807**，请求会安安静静发到一个不存在的 GID 上。同类写法在 `dedupeFriendsByGid`、`markKnownFriendGidInvalid`、`removeKnownFriendGid` 各有一处，一并改成 `Number(toNum(x))` + `Number.isSafeInteger`（保留「数字字符串能认」的既有行为，只挡非有限值）。
+- **资本模式测试锁的三类不变量**：① 任何失败路径（派狗抛错、召回抛错、被别人占用、狗未拥有）都必须把 `phase` 收回 `idle`——漏一条就会**永久卡死**，此后所有务农操作都不再自动派狗，日志里什么都看不到；② 派出成功必须注册 120 秒兜底召回，撤回后两个定时器都要清掉；③ 5 秒节流窗口内不重复派狗，手动命令与配置变更要能收回自动派出的狗、且不能误撤别人的狗。
+- **登录安全测试锁的**：密码长度与字符类别边界、常见弱口令、PBKDF2 加盐哈希的往返与篡改检测、老版无盐 sha256 的兼容与「需要重新哈希」标记、失败 4 次不锁第 5 次锁 15 分钟、登录成功清零、锁定落盘后重启仍生效、单 IP 前 10 次放行第 11 次限流、窗口过期自动清零、以及**加载记录文件时只认 `admin` 与 `ip:` 前缀**（否则一条被写坏的记录就能伪造出十年锁定，把管理员永久锁在门外）。
+- **中间件测试锁的**：客户端 IP 的取值优先级与 `::ffff:` 前缀剥离（取错头会让所有请求共用一个限流桶，或反过来绕开限流）、token 闸门的放行与 401、账号列表在 provider 抛错时回落持久化存储、软错误 / 网关错误的分类、以及 `errorCode` 只在有限且非零时下发（`Infinity` 进 JSON 会变成 `null`）。
+- **其余几个**：出售条件的三种活动语义（结束后 / 结束前 / 区间外）× 窗口存在性的完整真值表，并锁住「活动窗口表未加载时一律判 false」这条保守策略；账号解析的 id / uin / qq 三种标识与「命中了但没有 id 时返回空串」；请求班次的继承、嵌套覆盖与离开作用域后不泄漏（异步跨 `await` 也要保留）；GID 缓存的路径穿越防护（账号 id 里的 `../` 与分隔符必须被替换掉，否则能写到数据目录之外）与读写失败吞错。
+- **验证**：`pnpm verify` 全绿（core 725 → **848**、web 248、lint 0、类型检查 0）。
+- **仍未覆盖的部分**（如实记录）：`services/collections.ts`（19KB，图鉴/变异数据整形，依赖游戏配置快照）、`services/analytics.ts`、`services/invite.ts`、`services/dog-skill-gifts.ts`、`services/activity-windows.ts` 仍未补测试；真实游戏协议变更、多账号并发时序、弱网重连恢复这三类结构上无法用单测覆盖。
+
+### 2026-11-14 · v3.25.3（#172） · 修复请求参数以 Infinity 绕过校验，并把外部输入面收成清单闸门
+
+- **这轮换了做法：不猜下一个 bug 在哪，而是把「进程外能写进来的东西」列成清单**。前几轮的问题是「读代码找坏味道」，读只能发现「看起来不对」的，发现不了「看起来对但语义错」的。这次先把所有入口点扫出来——`src/controllers/admin/` 下 17 个路由文件、78 个「文件 + 字段 + 来源」的接入点、127 处引用——再逐条问「它是什么类型、值域多少、在哪里被拦」。
+- **同一个洞的五个副本**：`Number(x) || 0` 不构成校验。`JSON.parse` 吃到 `1e400` 得到的是 `Infinity`，它是 truthy，`||` 根本不生效；`Math.max(0, Infinity)` 还是 `Infinity`。上一轮修的是宠物资本模式和两个宠物接口，这轮顺着同一条线又找出四处——**修实例而不修模式，就一定会漏掉副本**：
+  - `/api/pets/food/use` 的 `itemId`：上次只改了 `count` 和 `uid`，`itemId` 仍是 `Math.max(0, Math.trunc(Number(...) || 0))`；
+  - worker 侧 `removePlant([Number(args[0]) || 0])`：地块编号为 `Infinity` 时直接编进 int64；
+  - `planting.fertilizeOwnLand` 走 `toNum`：`!landId || landId <= 0` 对 `Infinity` 两个条件都不成立；
+  - worker 侧 `useItem` 的 `itemId` / `count` / `uid` 与 `buyFertilizer` 的 `count`。
+- **`toNum` 本身不承担校验职责**：它只做「Long → number」的转换（`LongModule.isLong(val) ? val.toNumber() : val || 0`），拿它当校验器用就是把 `Infinity` 原样传下去。现在明确规定：**外部可写的数值一律先过 `read*` 守卫，`toNum` 只用于服务端返回值**。`warehouse.sellItems` 里两处 `toNum(item.id)` / `toNum(item.count)` 一并改掉——原来的症状是「背包中未找到物品Infinity」这种看不懂的报错。
+- **统一守卫模块 `core/src/utils/input-guards.ts`**：`readId` / `readInt` / `readCount` / `readNonNegativeInt` / `readIdList` / `readEnumOr` 以及静默变体 `read*Or`。只认整数与纯整数文本，布尔 / 对象 / 数组 / 小数 / `NaN` / `±Infinity` / 超出安全整数 / 超过 19 位的数字文本一律拒绝；抛 `InputError` 并带字段名，路由侧映射成 400（其余错误仍走 `handleApiError`，保持既有 200/500 形状）。顺带把化肥阈值的区间与账户配置对齐（数量 ≤10000、阈值 ≤990 小时）——之前手工调接口能写进配置层夹不住的值。
+- **闸门 `core/tests/input-surface.test.js`（9 条）**，这才是这轮的产出：
+  - 清单与源码**双向**比对：新增路由字段不登记就红（逼着当场分类），清单里有源码已删的字段也红；
+  - 标为「路由层校验」的数值字段，每一处接入点都必须在 `read*` 或既有校验器（`parseLogLimit` / `positiveInteger` / `boundedInteger` / `safePositiveNumber` / `Number.isInteger` …）的窗口内；
+  - 标为「下游校验」的字段，钉住那个校验器还在（例如 `positiveDecimal(countInput`、`normalizeLandIds(landIdsInput`、`if (!ACTIONS[action]`）；
+  - 18 组敌意输入的实跑断言（`'1e400'`、`Number('1e400')`、`±Infinity`、`NaN`、负数、小数、布尔、数组、对象、`null`、`undefined`、空白、尾随字符、超安全整数、超长数组）；
+  - 控制器层禁止 `Number(req...) || …`、`Math.max(0, Math.trunc(Number(req...)))`、`toNum(req...)`；worker 层禁止 `Number(args[...]) || 0`。
+- **这套闸门能证明什么、不能证明什么**（写在测试文件头部，避免以后误读）：能证明清单与源码一致、没有任何路径把未经整数性检查的请求值当数值用、极端值会被拒绝；**不能**证明每个转发点都在本地校验——本仓库的约定是「路由转发、服务层校验」，大量数值在下游由 `positiveDecimal` 一族拦住，清单只能钉住校验器还在，逐字段证明得靠服务层自己的测试。
+- **顺手核对、结论是「没问题」的**：商城 `purchaseProps` / `purchaseMallProduct` / `purchaseMysteryOffer` 的 `positiveInteger` 已经足够严（正则拒掉 `1e400` 文本，`isSafeInteger` 拒掉溢出）；好友互动道具的 `safePositiveNumber` + `normalizeLandIds`；活动中心 `weather-activity` / `qixi` / `stellar` / `qingmei` / `charity` / `pet-diary` 全部走 `positiveDecimal` 或动作白名单；`/api/farm/ripen-all/step` 的 `cursor` 靠与预览会话等值比较，非法值只会得到「预览已失效」。
+- **发现但没动的**：`buyWeatherBottle` 实际映射到 `exchangeWeatherCollectorBottle`（不接受任何参数），路由收的 `count` 是死参数；`operatePetDiary` 的 `gid` 只用于查询，不写协议。这两处在清单里分别标成 `ignored` 与 `service`，不断言其数值语义。
+- **验证**：`pnpm verify` 全绿（core 715 → **725**、web 248、lint 0、类型检查 0）。
+
+### 2026-11-13 · v3.25.2（#171） · 参数与边界复查：间隔上限缺失、定时器延时溢出、Infinity 放行与管理端口校验
+
+- **这轮换了角度**：前四轮复查走的是「扫代码找坏味道」，每次捞回的都是同一批（未处理 Promise、竞态、空 catch）。这轮不扫代码，只查**数值本身的合理性**——单位、上下界、溢出、哨兵值。做法也换了：不再靠肉眼，而是把归一化函数拉出来用极端值实跑（NaN / ±Infinity / 1e15 / 数字字符串 / 空串 / 对象 / 数组 / 小数），看它吐回什么。
+- **最实的一条：巡查 / 好友间隔没有上限**。面板只写了 `min="1"`、没有 `max`，服务端 `normalizeIntervals` 也只有下限。实跑确认 `intervals.farm = 1e15` 会被原样收下，随后 `* 1000` 变成 `1e18` 毫秒交给定时器——而 Node 对超过 `2147483647` 的延时会打 `TimeoutOverflowWarning` 并把延时**改成 1ms**，原本「等一小时」的任务立刻变成 1ms 空转。更常见的实际后果没那么极端：把毫秒当秒填成 `20000`（想填 20 秒），农场就会安静地停摆 5 个半小时，界面没有任何提示。修法是把 `INTERVAL_MAX_SEC = 86400`（这个常量本来就在，只是这两条路径没用上）落到 `normalizeIntervals`、账号配置的逐项归一化、以及 worker 的 `normalizeIntervalRangeSec` 三处；面板两处表单补 `:max`，`intervalModel` 的 setter 也自己夹一次（输入框的 `max` 拦不住粘贴和程序赋值）。
+- **定时器侧再加一道**：`scheduler.toDelayMs` 原来只有下限（`Math.max(0, …)`），现在同时对 `MAX_TIMER_DELAY_MS = 2147483647` 封顶。这样即使将来某个 env（`FARM_STATUS_SYNC_INTERVAL_MS`）或新配置绕过了上游归一化，最坏也是「早醒」而不是「1ms 热循环」。
+- **Infinity 被当成合法数字放行**：`Number(x) || 0` 对 `Infinity` 不生效（它是 truthy），`Math.max(0, Infinity)` 也仍然是 `Infinity`。JSON 里写 `1e400` 解析出来就是 `Infinity`，所以这不是理论问题。命中两处：宠物资本模式的 `dogId`（变成 `Infinity` 后 `dog.id === dogId` 永远不成立，资本模式静默变成「从不派狗」，界面一切正常）；管理接口 `useDogFood` 的 `uid` / `count` 与 `activate` / `deploy` 的 `dogId`（`Infinity` 会编进 int64 字段，调用静默失效）。统一改成先 `Number.isFinite` 再取整。
+- **管理端口没校验**：`ADMIN_PORT=70000` 这种「有限但越界」的值会让 `server.listen()` 抛 `ERR_SOCKET_BAD_PORT`，崩在启动阶段且看不出是环境变量写错了（`NaN` 反而被 `|| 3007` 兜住了）。新增 `resolveAdminPort()`，非法值回落 `DEFAULT_ADMIN_PORT` 并统一常量。
+- **复查过、确认没问题、没动的**：`Date.now() - x < N` 这类「毫秒当秒用」的比较（全仓 2 处，都确实按毫秒）；`reduce` 无初值（3 处都有初值）；`Math.min(...arr)` 空数组（都已有长度守卫）；两份归一化器（`shared-state` 与 `account-config`）的夹取区间逐字段比对，只有 `leadSeconds` 单边存在（资本模式是全局配置，不是每账号，符合预期）；代码里 11 个道具 ID 魔数逐个到 `ItemInfo.json` 核对名称，全部对得上（金币 1001 / 点券 1002 / 钻石 1004 / 金豆 1005 / 天气采集瓶 5001 / 雷雨召唤瓶 5002 / 青蛙使坏瓶 5005 / 乌云使坏瓶 5006 / 雷电徽章 1027 / 黄金虫 301101 / 白萝卜种子 29999）。
+- **前几轮修复是否还成立**：`pnpm verify` 全绿即回归锁全部通过；另逐项确认必须保留的本地特性都还在（2×2 预留窗口 `reservationWindow` / `plantingRoundGate`、`allowXxx` 单一决策、预检账本 `recordPreflightResult`、`describeGatewayStall`、`startLogSizeGuard`、`invokePendingCallback`、`sendApiResponse`、`cancelPendingRelogin`）。
+- **新增闸门**（这轮的真正产出不是那几个修复，是下面两组会自己报警的测试）：`core/tests/config-param-bounds.test.js` 8 条——对两套归一化器做极端值实跑，断言所有间隔都是 `[1, INTERVAL_MAX_SEC]` 内的有限整数；断言 `INTERVAL_MAX_SEC * 1000 <= MAX_TIMER_DELAY_MS`（把「秒级配置上限」和「毫秒级定时器上限」绑在一起，任一边被调大而另一边没跟上就红）；用真实 scheduler 注册 `1e18` 延时任务并读快照确认已截断；端口解析表驱动；worker 的 `MAX_INTERVAL_SEC` 与 store 常量比对防漂移；禁止「Infinity 放行」写法回潮。`web/tests/interval-limits.test.mjs` 3 条——前端 `INTERVAL_MAX_SECONDS` 必须等于 core 的 `INTERVAL_MAX_SEC`、两处表单 8 个输入框都带上下限、setter 必须自己夹。
+- **验证**：`pnpm verify` 全绿（core 707 → **715**、web 245 → **248**、lint 0、类型检查 0），`vite build` 真实退出码通过。
+
+### 2026-11-13 · v3.25.1（#170） · 重构切号竞态：27 处手写序号计数器全部收口到统一请求守卫
+
+- **为什么动这一块**：切号竞态是反复出现的缺陷类别，根因不是某一个 store 写错，而是**每个 store 各写一份 `let seq = 0`**。手写版本有四个容易漏的点：① 取票必须在 await 之前；② 回包落地前必须校验；③ 切号 / 关闭弹窗必须作废在途；④ 校验时还要顺带确认账号没被切走。任漏一处，症状都是「A 账号的数据写进了已切到 B 的面板」，不报错、只能肉眼发现。全仓共 27 处手写副本，其中 4 处（`commerce`、`AccountModal` 的三个 flow 版本）连上一轮的清单都漏掉了。
+- **新增 `web/src/utils/request-guard.ts`**：`createRequestGuard()` 返回三个动作——`next(account?)` 取票并快照账号、`isStale(ticket)` 一次判完「票是否最新 + 账号是否还是同一个」、`invalidate()` 作废全部在途；另加 `snapshot()` 给「由外部事件作废、自己不递增」的场景（关闭弹窗、组件卸载、活动结束）。账号绑定是可选项：全局数据（账号列表、登录配置）不绑，账号相关的拉取绑上。
+- **迁移范围**：`stores/account`、`stores/commerce`、`stores/farm`（土地 / 施肥 / 互动道具三个）、`stores/friend`（好友列表 / 互动道具两个）、`stores/pet`（宠物信息 / 礼包两个）、`stores/pet-diary`、`stores/setting`、`stores/status`（状态 / 日志 / 钻石 / 每日礼包四个）、`composables/settings/usePlantingStrategy`（四个）、`components/FarmPanel`（详情操作 / 催熟全部 / 批量施肥三个）、`components/IllustratedPanel`（购买 / 领取两个）、`components/activity/MilkTeaActivityPanel`（活动代际 + 记录版本两个）、`components/AccountModal`（登录配置 + 微信 / QQ 两条登录流三个）。
+- **顺带消掉的重复条件**：`usePlantingStrategy` 里每处都手写 `id !== currentAccountId()`、`IllustratedPanel` 里每处都手写 `accountId !== String(currentAccountId.value)`——绑定账号后这些条件并入 `isStale()`，漏写的风险随之消失。
+- **两处刻意保持原语义**：`pet` 的「拾取礼包」`finally` 只判票号不判账号——若切号也把 `claimingGifts` 卡在 true，新账号的按钮会一直转圈（切号时由 `clear()` 显式复位）；`IllustratedPanel` 的领取**加了**账号校验（原来只判票号），切号后不再给旧账号弹 toast 或重置列表，属于收紧而非放宽。
+- **测试**：新增 `web/tests/request-guard.test.mjs` 11 条——8 条行为（最新票生效、`invalidate` 作废、`snapshot` 不递增、绑定账号后切号即过期、显式账号快照、空票按过期、账号归一化），3 条仓库闸门（`src` 里不允许再出现 `let xxxSeq/Sequence/Revision/generation/Version = 0`、11 个已知并发拉取点必须接守卫、取了票必须校验）。web **234 → 245** 全绿。
+- **测试基建**：新增 `web/tests/helpers/ts-modules.mjs`，把「转译 TS 后塞进 require 别名表」这件事收成一处（`loadTsModule` + 复用的 `requestGuardModule`），4 个用真实 store 跑行为的测试不再各写一份转译逻辑。
+- **没动**：`stores/activity-center.ts` 的 `requestVersion` 是 `ref` 且承担「操作独占版本」，语义与请求守卫不同（mutate 需要让并发加载失效），继续保留。
+- **验证**：`pnpm verify` 全绿（core 707 / web 245 / lint 0 / 类型检查 0），`vite build` 真实退出码通过（22s）。
+
+### 2026-11-13 · v3.25.0（#169） · 新增防复发门禁：把「未处理 Promise」这类反复出现的问题变成写的时候就报错
+
+- **起因**：连续四轮全仓复查，每次都能捞出一批同类缺陷（async 函数被当同步回调传出去、定时器不接管拒绝、切号竞态）。原因不是代码里还有没扫到的角落，而是**每一轮只修实例、没有闸门**——同一个写法在仓里有几十份副本，修掉五处，剩下的一直在，下一轮自然还是它。这轮不再扫代码，改成把规则固化。
+- **门禁一（core）**：接入类型感知 lint，只启用「未处理 Promise」这一族——`ts/no-floating-promises`、`ts/no-misused-promises`、`ts/await-thenable`。其余类型感知规则（`no-unsafe-*`、`strict-boolean-expressions`、`promise-function-async` 等）在 non-strict 代码库上噪声过大，逐条显式关掉并在配置里写明理由。`no-misused-promises` 关掉 `checksConditionals`：仓里大量 `if (pendingPromise)` 是「用 Promise 当哨兵」的合法写法，不该被判成缺陷。
+- **类型感知只覆盖 `src/**`**：`client.ts` 是根目录入口、不在 `tsconfig.json` 的 `include` 里，放开全目录会让 project service 直接报错退出；用 `filesTypeAware` 限定范围，入口文件仍走普通 lint。
+- **当场修掉的 5 处真问题**：`scheduler.ts` 的 `setTimeout(async …)` 与 `setInterval(runner)` 都不接管返回值，任务里任何一步意外抛错都会变成未处理拒绝（Node 20 视为致命）——改为显式 `runOnce().catch(…)` / `runner().catch(…)` 并记 error 日志；`worker.ts` 的 `onMasterMessage(async msg => …)` 同理，把处理器签名放宽成 `void | Promise<void>` 并由 `onMasterMessage` 统一接管拒绝，比在每个调用点各写一遍 `.catch` 更不容易漏；`network.ts` 的请求回调类型原本声明成 `=> void`，与实际传入的 `async` 回调不符，改成 `=> void | Promise<void>`（`invokePendingCallback` 本来就会接住 thenable，类型只是如实描述）；`sendLogin` 的 `onLoginSuccess` 同步放宽，`await onLoginSuccess()` 不再是「await 一个非 Promise」。
+- **门禁二（web）**：同一套规则接入前端，实测 6 处——`useFarmAutoRefreshInterval` 把 `tick` 直接交给 `useIntervalFn`，async tick 抛错后定时器还在跑、界面却再也不更新，新增 `safeTick` 统一捕获并 `console.error`；`usePlantingStrategy` 里 5 处「内部已 try/catch 并写入错误状态」的加载调用改为显式 `void`（说明这是按设计不等待，而不是漏写 await）。
+- **门禁三（一键验证）**：新增 `pnpm verify`＝`lint + test + typecheck:web`。以后「帮我检查一下」有确定命令，不再靠人工重新扫一遍、扫出什么算什么。
+- **门禁本身也要锁**：新增 `core/tests/lint-gate.test.js`（6 条）与 `web/tests/lint-gate.test.mjs`（4 条），断言规则确实开着、噪声规则确实关着、`tsconfigPath` 没被删、定时器注册处仍带 `.catch`、`onMasterMessage` 仍接管拒绝——防止后来者顺手把门禁关掉或改弱。
+- **没做、需要单独一轮的**：切号竞态这一类 lint 抓不到。前端现有 **23 处手写序号守卫**（`let xxxSeq = 0` 散布在 8 个 store / composable 里），没有共享抽象，新写一个 store 就只能靠人记得补守卫——这正是它反复出现的原因。正确做法是抽一个统一的请求守卫工具再逐处迁移，改动面横跨多个 store 与其静态断言，不适合塞进这轮。
+- **验证**：core **701 → 707**、web **230 → 234**，`pnpm verify` 全绿；`vite build` 用真实退出码复核通过（19s）。类型感知让 lint 从数秒涨到约 1 分钟，换来的是这类缺陷在提交前就被拦住。
+### 2026-11-13 · v3.23.8（#168） · 全仓完整性复查（第四轮，含前四轮回归）：修复进程致命拒绝、启动失败卡死与切号串数据
+
+- **复查方式**：这轮明确把前四轮修过的也算进去，分两条线——① 逐条回归验证 v3.23.0 / .3 / .5 / .6 / .7 的接线仍然闭环，并把关键锚点写进 `core/tests/full-review-regression.test.js` 与 `web/tests/full-review-regression.test.mjs` 长期锁住；② 分三个区域（协议/网络/worker 主循环、其余控制器与持久化、前端组件与 stores）并行扫描未覆盖代码。共修复 19 处，按「会不会直接把进程带走」排序。
+- **登录回包回调是 async，却被同步调用（最严重）**：`network.ts` 的 `handleMessage` 里 5 处 `pending.callback(...)` 都是裸调用，而登录回包的 callback 是 `async`。同步 `try/catch` 拦不住 Promise 拒绝，Node 20 默认把未处理拒绝当致命错误 → 登录过程中任何一步附属操作抛错（状态栏渲染、落盘日志、诊断快照）都会直接终止 worker。新增 `invokePendingCallback()` 统一包装，把同步抛错与异步拒绝一起收敛成告警，5 个调用点全部改走它。
+- **`api_call` 同样是 fire-and-forget**：`worker.ts` 里 `handleApiCall(msg)` 没有 `await` / `.catch`，且回包语句 `sendToMaster({type:'api_response'...})` 在 `try/catch` 之外——`result` 混入 BigInt / 循环引用时 `process.send` 同步抛 TypeError，异常变成未处理拒绝带走 worker，主进程还永远等不到回包。改为 `.catch` + 新增 `sendApiResponse()`（序列化失败时降级回一条纯文本错误，不让面板请求挂到超时）。
+- **启动初始化失败会让账号永久卡死**：`startBot()` 一进来就把 `isRunning = true`，之后 `config` 缺字段、`loadProto()` 失败、`connect()` 因空 Code 抛错都会冒泡出去而不回滚；由于后续所有 start 消息都被 `if (isRunning) return` 静默吞掉，账号再也无法启动，必须外部重新 spawn。现在 start 分支 catch 里回滚 `isRunning` / `shutdownStarted`。
+- **畸形登录回包白等 20 秒**：`error_code=0` 但 body 解不出 `PlayerLoginReply`、或回包缺 `basic` 时，原来只 `return`，连接停在 `phase='login'`，干等 `login_timeout` 20 秒才断线重登，且没有 warn 级日志。现在走正常断线收尾，让主进程立即补 Code 重来。
+- **场景登录按错误类型分流**：`PlayerSceneLogin` 与「登录本身失败」共用一个 catch，弱网超时也会 `finalizeConnection` + `terminate()`，形成「登录成功→立即断开→重登」死循环。现在只对超时类错误记 warn 后继续在线；**协议级错误（回包不完整 / 解码失败 / 连接被替换）仍按登录失败收尾**——`player-scene-login.test.js` 锁的是有意的安全闸门，不能为了让弱网更好看就把它降级。
+- **请求超时参数没有边界**：`Math.max(1, Number(options.timeoutMs) || 20000)` 遇到 `Infinity` 会原样下传，调度器的 `toDelayMs` 把非有限值折成 0 → 请求刚入队就被判「尚未排到连接」超时。改为只接受有限正数。
+- **mmtls 连接与定时器泄漏**：`native-protocol.ts` 的连接超时 `setTimeout` 从不 `clearTimeout`（即使 100ms 就连上，30s 活定时器仍挂着拖住 worker 退出）；短链 `c.send` 失败会跳过 `c.close()`；长链握手任一步失败时局部 `c` 没人关，最多 8 个接入点逐个重试就泄漏 8 条 TCP 连接。全部改为 `finally` 统一释放。
+- **管理员口令先改内存后写盘 + 非原子写**：`admin-store.ts` 里 `changePassword` 是 `current.password = hash; saveAdmin()`，写盘抛错时接口 500 但内存口令已变、旧 token 也没被清；`fs.writeFileSync` 非原子，半截文件在重启后会被 `catch → admin=null` 静默重建成公开的 `admin/admin`。改走既有的 `writeJsonFileAtomic()`，并新增 `persistAdmin()` 保证「先写盘成功、再换内存」；损坏文件留档 `.corrupt-<ts>` 并打醒目告警，不再静默当成首次安装。
+- **微信长效凭据写盘失败仍回报成功**：`/api/wx-login/tasks/:taskId/code` 的空 `catch` 把 `addOrUpdateAccount` 的落盘失败完全吞掉，接口照常 `ok:true`，前端以为免扫码续期已生效，重启后凭据全丢、回落重新扫码。现在记日志并返回 500，`destroy(task)` 仍在提前返回前执行。
+- **删除好友被游戏侧拒绝仍写本地黑名单**：`delFriend` 会以 `{ok:false}` 表达拒绝（不抛异常），路由不检查就拉黑、移除已知 GID、广播配置，最后回报「删除好友成功」。现在先判 `ok === false` 直接返回，跳过所有本地变更。
+- **async 路由的读盘/写盘在 try 之外**：`friend-blacklist` 的 GET 与 toggle 是 async handler，Express 4 不捕获其 rejected promise；`store.getFriendBlacklist` / `setFriendBlacklist` 抛错会让请求永远挂着并变成未处理拒绝。两处补就地 `try/catch` → `handleApiError`。
+- **负数 / Infinity 绕过参数校验**：`!seedId` / `!gid` / `Number(x) || 0` 会放行 `-1` 与 `Infinity`；黑名单下游静默过滤却回报 `ok:true`，化肥购买则把负数直接下传花钱逻辑。统一改成有限正数 / 正整数校验。
+- **NapCat 插件配置损坏会全量免鉴权**：插件 `config()` 把「文件不存在」和「JSON 损坏」都吞成 `{}`，`token` 为空时 `authorized()` 直接放行，而 `/miniapp`、`/logout`、`/status` 都是 `NoAuth` 路由。现在区分 ENOENT（首次安装没配 token，保持既有本地免鉴权）与其他读取失败（损坏 → 三个路由一律 503 并打日志），不改动现有部署行为。
+- **前端切号串数据（一组）**：① `status.ts` 的 `fetchLogs` 是同 store 里唯一没有序号守卫的拉取，Dashboard 10s 轮询与切号并发时旧账号响应会覆盖新账号日志；实时 `log:new` / `logs:snapshot` 也没有账号守卫（服务端明确下发 `accountId`），切号还不清 `logs`。② `friend.ts` 的好友 / 缓存 / 访客记录 / 黑名单四个 fetch 全无守卫，`resetFriendLandState` 也只清土地状态。③ `farm.ts` 的「操作后补刷」用操作发起时的旧 `accountId` 发一笔全新请求，绕过 `landRequestSequence` 守卫，把 A 的土地与 60s overlay 写进已切到 B 的面板。④ `activity-center.ts` 的 `mutate` 只读当前 `requestVersion`，任何并发加载递增版本都会把「后端已成功执行」的操作结果静默丢弃，用户点了没反应、往往重复点击；`reset()` 不清 `pendingLoads` 还会让 `force` 刷新命中已被作废的旧 promise。分别补序号 / 账号守卫、补刷前的账号核对、操作独占版本与清空在途 load。
+- **两处「卡住不自愈」的小问题**：`SolarCalendar.vue` 首次加载失败时 `data=null`，`Math.min(...[])` 得到 `Infinity`，靠时间边界自动刷新的入口永远走不到，页面停在错误态直到手动刷新；现在显式返回 `POSITIVE_INFINITY`、保护 `events` 缺失、并排一次带序号的 10 秒重试。`Friends.vue` 切号或好友数下降后 `currentPage` 仍停在旧页，`slice` 越界返回空数组，列表一片空白且没有「无数据」提示；补 `watch(totalPages)` clamp 与切号重置。
+- **核对后判定「不是缺陷」，没改**：① 场景回包不完整必须 terminate（`player-scene-login.test.js` 锁的有意闸门，本轮只把超时分流）；② `start`/`stop` 用路径 `:id` 而不是 header 是接口语义，改成 header 会破坏按指定账号启停；③ 各路由错误响应 200/500 形状分裂属历史兼容，统一会牵动全部前端解析；④ `version.mjs` 的 `git()` 吞错与 `nas-deploy.sh` 的 `step_down` 容错触发条件受限，且部署脚本顺序是既定约定，不动。
+- **测试**：core **688 → 701**（新增 `full-review-regression.test.js` 13 条：本轮 12 处修复的接线锁 + 前四轮关键锚点逐条回归），web **223 → 230**（新增 `full-review-regression.test.mjs` 7 条）。`pnpm lint` 0 error、`build:ts` / `vue-tsc -b` / `vite build` 全过。
+
+### 2026-11-13 · v3.23.7（#167） · 修复账号运行状态从不更新：补齐后端状态机，登录中 / 等待重登 / 停止中终于可见
+
+- **问题**：前端 `utils/account-runtime.ts` 早就判了 `logging_in` / `relogin_waiting` / `running` / `offline` / `stopping` / `stopped` 六个状态，`relogin_waiting` 还会按 `reloginAt` 算「掉线重登，剩余 N 秒」，但 `/api/accounts` 从来没有下发过 `runtimeState`——`data-provider.getAccounts()` 只写了一个布尔 `running`。结果是这些分支全是死代码：账号卡片只会显示「运行中 / 已停止」，刚点启动还在建连接和真跑起来长得一样，掉线等 60 秒自动重登看起来像被手动停了，停止过程中按钮也不会置灰。
+- **新增 `services/account-runtime-state.ts`**：账号维度的内存状态账本（纯内存、无持久化，进程重启后一律从「已停止」重新走启动流程）。写入方只有真正知道事实的两个地方（`worker-manager` 的进程生命周期、`wx-keepalive` 的掉线重登调度），读取方只有 `data-provider.getAccounts()` 的列表投影。带两个保护：`onlyFrom` 守卫与「停止中」超时兜底。
+- **收尾写入必须带状态守卫**：断开流程的真实顺序是「先停进程、再排重登」，而子进程 `exit` 是异步事件，会在 `notifyAccountOffline` 写好「等待重登」之后才到。`exit` 回调若无条件写「已停止」，刚写好的倒计时就被覆盖，用户永远看不到自愈。新增 `onlyFrom: ['stopping','logging_in','running']`，只在确实该收尾的状态下才落「已停止」。
+- **崩溃与主动停止要分开显示**：进程自己挂掉（崩溃 / 被 OOM 杀掉）落「已掉线」而不是「已停止」——「已停止」会让人以为是用户自己停的，实际是异常退出等人处理。判断依据是退出前那一刻的状态是否为 `stopping`。
+- **掉线重登的三条「回不来」分支都写「已掉线」**：关掉掉线重登、没有可免扫码恢复的凭证、一小时次数闸门挡住（含暂停 30 分钟）——这三种情况账号都不会再被自动拉起，显示「等待重登」是欺骗。正常等待期才写 `relogin_waiting` 并带上 `reloginAt = now + 等待秒数`；换码失败不会重启，状态回落成「已掉线」。
+- **手动停止 / 启动 / 重启要先撤掉待执行的重登定时器**：等待期内账号没有子进程，`stopWorker` 根本停不掉那条 `setTimeout`，到点会把账号重新拉起来——用户视角就是「点了停止却自己启动了」。`wx-keepalive` 新增导出 `cancelPendingRelogin()`，由 `runtime-engine` 注入给 `data-provider`，三个手动入口统一调用。（用注入而不是在 `data-provider` 里 `require`：保活模块顶层会加载凭证服务，一旦在启动链路上静态依赖，测试里靠 `Module._load` 注入假实现的隔离就失效了。）
+- **面板顺带修掉一个会误删账号的入口**：「一键清理已停止账号」用 `!isAccountActive(acc)` 过滤，而等待重登期间 `running=false` 且以前没有 `runtimeState`，正在等自动重登的账号看起来就是「已停止」，会被一起清掉。现在等待重登算在册，不会被清理。
+- **「停止中」加 30 秒兜底**：正常路径 1 秒内强杀、进程随即退出；万一个别平台卡在不可中断的 IO 上连 `kill()` 都不返回，状态会一直停在 `stopping`，面板那颗「停止」按钮就永久置灰——比不显示状态更糟。`getAccountRuntimeState()` 对超过 `STOPPING_STALE_MS` 的 `stopping` 按 `stopped` 返回。
+- **前端只做加法**：`account-runtime.ts` 补上 `case 'running'`（原来落到 default 分支，靠 `running` 布尔兜着，后端明确下发 `running` 但布尔为 false 的那一瞬会显示「已停止」）；其余文案、颜色、忙态不变。
+- **兼容旧版服务**：账本里没有记录（本次进程还没碰过这个账号）时，`getAccounts()` 按有无子进程回落成 `running` / `stopped`，与旧字段语义完全一致；`reloginAt` 缺省为 `0`，前端不会算出 `NaN` 秒。
+- **测试**：core **676 → 688**（新增 `account-runtime-state.test.js` 12 条：状态集合与前端联合类型逐字一致、`reloginAt` 只在等待态保留、`onlyFrom` 守卫、停止中超时、三条「已掉线」分支、接口投影、三个手动入口的撤销接线），web **217 → 223**（新增 `account-runtime-state.test.mjs` 6 条：六态文案、`running` 不被布尔带偏、倒计时与非法 `reloginAt`、忙态、`isAccountActive` 语义、面板禁用与清理过滤）。`account-online-card` 里「关闭开关立即 return」那条静态断言按新分支改写（语义未变，`return` 前多了一次状态落盘）。`pnpm lint` 0 error、`build:ts` / `vue-tsc -b` / `vite build` 全过。
+
+### 2026-11-13 · v3.23.6（#166） · 全仓完整性复查：修复「全部账号」日志排序失效、停机不清活动主循环与巡检周期被反复重置
+
+- **复查范围**：第三次换角度。前两轮分别看「微信协议层 + 保活层」与「农场 / 好友 / 统计 / 持久化」，这一轮走 HTTP 路由层（`controllers/admin`）、前端 `utils` 与 `stores` 纯逻辑、以及各定时器的注册 / 清理生命周期。
+- **「全部账号」日志既不排序也会丢日志（最影响使用）**：`/api/logs` 在没有指定账号时，把每个账号各自的最新 N 条拼起来后按 `time` 排序，可运行日志条目上根本没有 `time`（只有数值 `ts`，`time` 是账号日志专用的格式化文本）。两边都取到 `undefined`，比较结果恒为 0，`sort` 实际什么都没做；紧接着 `slice(0, limit)` 取的是**数组头部**，于是结果只剩第一个账号的日志，其余账号的最新记录被整段丢掉。改为按 `ts`（缺省回退解析 `time`）升序合并后取尾部 `limit` 条，朝向与单账号分支的 `slice(-limit)` 一致，前端「跳到最新日志」仍然到底。
+- **日志条数参数没有边界**：`Number.parseInt(limit) || 100` 有两个坑——`limit=-5` 是负数，下游 `slice(-5)` 会被当成「从尾部取 5 条」，语义完全变了；`limit=1e9` 会让一次响应把整段历史都吐出来。新增 `services/log-query.ts` 统一收敛到 1~1000，非法值走默认 100。
+- **保存任何设置都会把活动自动化的 5 分钟周期清零**：配置下发路径无条件调用 `startActivityAutomationTimer()`，而 `setIntervalTask` 会先 `clear` 再注册，于是每保存一次设置，下一次活动检查就被推后一整个周期；面板频繁保存时会长时间不跑。改为「主循环已在注册表里就不重建」——开关状态每轮由 `getAutomationSnapshot()` 现读，保存后立即生效本来就有 `scheduleActivityAutomationAfterSave` 的 2 秒补跑兜着。
+- **神秘商人巡查的 10 分钟周期同样被反复重置**：`startMysteryShopTimer()` 每次保存都 `stop` + 重新注册。改为先判启用（关掉就真停，不许被去重分支挡住），再判「已在跑就不重建」。
+- **停机 / 切号时活动自动化的主循环定时器没被清**：`stopActivityAutomation()` 只清了 `activity_automation_initial` / `activity_automation_after_save` 与三个事件唤醒，**漏了 `activity_automation_interval` 本身**。目前唯一调用方是 `startActivityAutomation`（会先停再起，把同名任务覆盖掉），所以还没暴露；但任何后续新增的「停止」路径都会让每个周期继续按旧账号的开关跑一轮活动。一并补上，并把降级通道（无 `workerScheduler`）那条 10 秒首跑的 `setTimeout` 句柄也存起来，`stop` 时 `clearTimeout`——原来这条句柄根本没保存，停掉之后它照样会对旧账号发请求。
+- **面板消息 store 切号会被上一个账号的在途请求挡住**：`fetch()` 用全局 `loading` 做去重，切到新账号时若上一个账号的请求还没回来，新账号这一轮直接 `return`；同时列表里仍是上一个账号的消息，未读数也是别人的。改为按账号记录在途请求，并在切号瞬间先清空列表。（该 store 目前没有 UI 入口，属储备实现，但接口仍被测试锁定。）
+- **核对过但确认不是缺陷的三处（记下来避免下轮重复怀疑）**：① `/api/accounts` 下发账号 `code` 是**有意为之**——编辑账号弹窗要用它回填 Code 输入框，清掉会导致保存时把 Code 清空；测试里有这条断言。② `autoStartAccounts` / `autoCodeRefresh` 两个开关分开保存不会互相清零，`setSystemConfig` 对缺失字段回落到已保存值。③ `markLatestChangelogTitle` 的标题匹配只认标题前缀，描述里出现旧版本号不会误判。
+- **已知未修（记录，需要后端补状态机）**：前端 `utils/account-runtime.ts` 判了 `logging_in` / `relogin_waiting` / `offline` / `stopping` / `stopped` 五个状态，`reloginAt` 还会算「掉线重登，剩余 N 秒」，但 `/api/accounts` 从来没有下发过 `runtimeState`（`data-provider.getAccounts()` 只写 `running`），这些分支全是死代码，账号卡片只可能显示「运行中 / 已停止」，`停止中` 时停止按钮也不会置灰。要修得先在后端把「登录中 / 掉线等待重登 / 正在停止」做成账号维度的状态并随列表下发，属于功能新增，不随本次一并上线。
+- **测试**：core **667 → 676**（新增 `log-query-merge.test.js` 8 条，`audit-wiring-guards` 补 2 条：周期去重、停机清主循环），web **216 → 217**（面板消息切号 1 条 + 原断言改为新口径）。`pnpm lint` 0 error、`build:ts` / `vue-tsc -b` / `vite build` 全过。
+- **边界**：未改任何接口字段与协议常量；未改 Docker Compose、NAS 部署脚本与服务器配置。
+
+### 2026-11-13 · v3.23.5（#165） · 全仓完整性复查：修复统计跨日错位、好友帮忙自锁与 2×2 预留组误释放
+
+- **复查范围**：换成与上一轮不同的角度——上一轮只看微信登录协议层与保活层，这一轮覆盖农场种植与调度、好友访问与宠物同步、活动中心、统计与持久化、日志与下线提醒。
+- **统计跨日落盘写错日期（数据错位）**：`doSave()` 落盘时才重新取 `getTodayKey()`，而 `operations` 属于 `currentDateKey`。2 秒防抖跨过 00:00 时，昨天的全天计数会被写成「今天」的数；同日重启按 `saved.date === todayKey` 恢复，一整天都虚高。改为落盘前先做跨日检查、日期键取归属日。
+- **服务器时间回退会清零当日统计**：`checkAndResetDailyStats()` 只要日期键不相等就重置，而日期键来自登录/心跳同步的服务器时间，任何一次校正跨过日界都会让 `todayKey` 回退，把当天累计清零；两个键来回抖动时每 10 秒清一次。改为只允许单调前进，回退只告警、不动数据。
+- **当日基线联动初始化覆盖已有值**：`recomputeSessionTotals()` 用「任一为 null 就把三个一起写」的写法，存档里缺一个字段（例如 exp 被判非法丢弃）就会把有效的金币基线覆盖成当前余额，当日金币收益瞬间归零。改为逐字段补。
+- **登录余额未知被当成 0**：`initStats()` 把 `undefined`/NaN 压成 0，等于把「未知」钉成假基线，之后拿到真实余额就会把整个账户余额算成今日净增并写盘固化。金豆早就改成 null 语义了，金币/经验/点券这次补齐；`runInitial` 同样在首次观测时起算。
+- **满级预测速率口径错配**：`level-forecast` 用「当日累计经验 ÷ 本次运行秒数」，重启后头几分钟会把经验/小时放大几十倍。改用同口径的 `runExpGained`。
+- **只开「帮忙」时帮忙永远不执行（自锁）**：`canGetExp()` 在没有 `operation_limits` 时返回 false，而这份数据只由「偷菜/捣乱/务农」的回包写入，这些请求又被同一个闸门挡着。只开帮忙的配置（默认 `friend_help_exp_limit = true`）永远拿不到数据 → 永远不帮忙，却仍按计划进入每位好友农场空转。改为与 `canOperate` 同口径：未知即放行。
+- **化肥自动购买开启后永不启动**：`startFertilizerBuyCheckTimer()` 只在 `startFarmCheckLoop()`（登录）建一次，而两个开关默认关闭，登录时定时器根本不建；之后在面板打开开关不会再次调用，间隔修改也不生效。改为随配置下发重建，并按「开关 + 间隔」签名去重（避免频繁保存设置把计时不断重置）。
+- **宠物同步一次瞬时失败就当日不再重试**：`markFullSyncDone()` 只看 `deferred`，最后一个好友探测失败时也会被判定「全部完成」；该好友当天没有护主犬结论，经验上限开启时整天不帮忙。改为区分 `invalid`（已失效/已拉黑，本轮了结）与 `failed`（瞬时错误，要继续补测），并要求 `failed === 0` 才算完成。
+- **拜访好友主路径缺 Leave 兜底**：`visitFriend()` 里 Enter 之后的操作段是裸 `await`，任一步抛异常就直接冒到上层，Leave 不发，服务端仍认为在上一家庭里，下一次 Enter 可能被拒并被误判为无效好友。补 `try/finally`，与 `doFriendOperation` / `probeFriendDog` 一致。
+- **2×2 预留组被跨种子误释放**：当前种子凑不齐布局时，代码把 `activeKeys()` 返回的**所有**等待组一律 `release`，而那是整个 worker 的全局账本，里面还有别的种子仍在 60 秒有效窗口内的组。被误释放后 `occupants` 不变时 `evaluate` 永远返回 `released`，该组到换季前无法重新圈地。改为逐组用真实占用者重算指标，只释放「整组已空出」或「已超出等待窗口」的组。
+- **续期账本损坏会静默覆盖历史**：`preflight-stats` 用宽松读取，把「文件不存在」「JSON 损坏」「权限错误」都返回空对象，紧接着一次 `persist` 就用空表覆盖唯一副本，全部账号的 `lastSuccessAt` 与当日计数永久丢失。改用 strict 读取，损坏时先另存为 `*.corrupt-<时间戳>` 再重建。
+- **降级日志绕过体积上限**：winston 加载失败时走 `appendFileSync`，而体积守卫只在 winston 初始化成功后才启动——恰好是最容易无限追加的场景。把守卫移进 `ensureFallbackLogDir()`（幂等）。
+- **原子写缺 fsync、临时名会撞名**：`writeTextFileAtomic()` 在 rename 前不 fsync，容器被 kill 时可能留下 0 字节的「新」文件（对配置类文件等于整份归零）；临时名只有 `pid + 毫秒`，同毫秒同路径会互相覆盖。补 fsync（不支持时降级）与随机后缀。
+- **下线提醒刷屏且看不出原因**：开启「掉线自动重登」后断线是分钟级循环，每断一次推一条；`reason` 只进日志，用户收到的永远是固定文案。加按账号 10 分钟节流，并把原因与离线时长拼进正文。另修钉钉渠道校验：`!endpoint && !token` 会让「只有 token、没有地址」这种必然失败的配置通过。
+- **面板状态下发负数/Infinity**：`normalizeStatusForPanel()` 只挡 NaN，负数原样下发，`Infinity` 经 `JSON.stringify` 变 `null` 后前端相加会得到 NaN。统一收敛为有限非负数。
+- **QQ 取码串号守卫**：内置 NapCat 插件的 `/miniapp` 忽略请求里的 `uin`，签发的永远是「当前 NapCat 登录那个 QQ」的 Code 并回传真实 uin，而我们拿到就写盘。新增写盘前比对（数字归一 + 去前导 0），不一致直接拒绝并给出可读原因；日志只露末四位。
+- **测试**：core 648 → 667（新增 `relogin-reminder-throttle` 5 条、`audit-wiring-guards` 9 条，统计补 4 条、账本补 1 条），web 216。`pnpm lint` 0。
+- **已知未修**：`worker-manager` 的「持续离线 N 分钟自动删号」主路径不可达（`disconnectedSince` 挂在掉线 1 秒内就被删掉的 worker 条目上）。修它要把计时提到账号维度并新增独立定时任务，且恢复的是**真实删除账号**这个破坏性行为，需要单独评估，不随本次一并上线。
+- **边界**：未改任何接口字段与前端展示口径；未改 NAS 部署脚本与服务器配置。
+
+### 2026-11-13 · v3.23.3（#163） · 全仓完整性复查：修复凭证吊销闸门失效、续期窗口被推迟与续期异常打断主进程
+
+- **复查范围**：v3.23.x 引入的协议层与保活层（`wx-login/` 四个模块、`wx-credential`、`wx-keepalive`），以及账号存储、worker 进程管理、账号列表投影三处与它们直接相接的代码。
+- **缺陷一（高）·「授权已吊销」标记从未落盘**：`addOrUpdateAccount` 的白名单收下了 `wxCredentialNeedsRescan`，但 `normalizeAccount` 重建账号对象时只挑固定字段，把它丢掉了；而 `saveAccounts` 正是用它归一化后才写文件并回填内存缓存。结果这个标记在内存里只存在一瞬，`wx-keepalive` 里 `if (account.wxCredentialNeedsRescan) continue` 永远为假——凭证被 `-109` 吊销后，当天靠连续失败熔断挡住，跨日后状态重建，第二天又拿死 token 空打 OAuth 层。修法：账号类型补该字段，`normalizeAccount` 只保留 `true`（缺失等价于 false）。
+- **缺陷二（高）·只换 Code 也会把续期窗口推后最多两小时**：`rotatedKeys` 里含 `code`，于是「用 loginBuffer 直接换 Code」「手动填 Code」这类**完全不碰 token** 的操作也会把 `wxCredentialRefreshedAt` 刷成当前时间。而 `code-watch` 与前端都按 `max(expires_at, refreshedAt + 2h)` 重算到期——真实 access token 只剩十分钟，界面和保活却以为还有两小时，等发现时已经过期掉线。这条正好命中「刚换过码、过一阵还是掉」。修法：把「换 Code」与「换令牌」拆成两组 key，只有 `refreshtoken` / `accesstoken` / `loginBuffer` / `expires_at` 真的变了才推进基准时间。
+- **缺陷三（高）·续期异常会打断主进程**：`refreshAndMaybeRestart` 只有 `finally` 没有 `catch`，而掉线重登那条路径是裸 `void refreshAndMaybeRestart(key, 'offline')`。任何预期外异常（账号文件写入失败、上游返回结构异常）都会变成未处理拒绝，Node 20 默认按致命错误处理，**主进程直接退出，所有账号同时掉线**。修法：函数内部把异常收口成「一次失败」——记账号日志、写系统日志、推进退避状态；调用点再加一层 `catch` 兜底。
+- **缺陷四（高）·worker 消息处理没有兜底**：`child.on('message')` 的回调里会写账号库（落盘失败抛 `storageError`）、会往子进程 `send`（IPC 通道关闭时**同步抛** `ERR_IPC_CHANNEL_CLOSED`）。这些都跑在事件回调里，抛出去等价于 `uncaughtException`，同样会带走主进程。修法：消息处理整体 try/catch；新增 `safeSend()` 包装全部 `send` 调用点；`stopWorker` 的 `send` 失败时直接清掉 worker 条目（否则 `startWorker` 的判重会让账号永远起不来，面板却显示运行中）；`callWorkerApi` 发不出去就立即 `reject` 并摘掉超时定时器，不让调用方白等 10~180 秒。
+- **缺陷五（中）·保活巡检的互斥是假的**：`tick()` 里用 `void runCodePreflight(...)` 触发异步任务后，`finally` 立刻把 `running` 置回 `false`——上一轮还在等上游，下一个 tick 照样进来，只靠 `inFlight` 与退避闸门兜着。修法：改成等 Promise 真正结束再释放，并给巡检异常加日志（原来是 `catch(() => {})` 全吞，出问题完全看不见）。
+- **缺陷六（中）·面板账本用了错误的判定口径**：后端下发的 `wxPreflightSupported` 表示「能滚 token」（`wxid` + `refreshtoken`），而真正的恢复能力 `canRecoverAccount` 还要包含「只有 loginBuffer」的账号。后者滚不了 token，但掉线后会自动换 Code 并写进账本，前端却因为 `wxPreflightSupported === false` 把整段账本隐藏，用户看到的是与事实相反的「不支持」。修法：投影新增 `wxCanRecover`（直接复用 `canRecoverAccount`，只在微信账号上下发），前端账本门禁改用它，字段缺失时回落到旧判定。
+- **顺手更正的三条测试**：`account-credential-state.test.js` 原来断言「换 Code 后 `refreshedAt` 会刷新」——正是缺陷二的错误语义，已改成「换 Code 不推进基准、换令牌才推进」；`code-preflight.test.js` 与 `account-online-card.test.mjs` 里断言 `void runCodePreflight(...).catch` 的接线，已改为断言新的「Promise 结束才释放 running + 异常必须落日志」。
+- **已知未修（记录，单独一版处理）**：`worker-manager` 的「持续离线 N 分钟自动删除账号」在主路径上不可达——计时状态 `disconnectedSince` 挂在 worker 条目上，而真实掉线会在 300ms~1s 内删掉该条目，分钟级的阈值永远累积不到。修法需要把计时提到账号维度并用独立定时任务，属于功能重做，本次不动。
+- **测试**：core **640 → 648**（新增凭证落盘、换 Code 不推进基准、异常吸收、单账号异常不影响同批、投影双口径等用例），web **215 → 216**。`pnpm lint` 0 error、`build:ts` / `vue-tsc -b` / `vite build` 全过。
+- **边界**：不改任何协议常量、不改 Docker Compose、不改 NAS / 服务器配置。
+
 ### 2026-11-13 · v3.23.2（#162） · Docker Hub 直连超时时，NapCat 镜像改用加速站或本地标签
 
 - **现象**：在宿主机上执行 `docker manifest inspect mlikiowa/napcat-docker:v4.18.42` 返回 `failed to configure transport: error pinging v2 registry: Get "https://registry-1.docker.io/v2/": net/http: request canceled while waiting for connection (Client.Timeout exceeded while awaiting headers)`。

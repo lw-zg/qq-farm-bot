@@ -2,6 +2,7 @@ import type { CareerHarvestSteal } from '@/components/CareerHarvestSteal.vue'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api, { getApiErrorMessage, normalizeApiErrorMessage } from '@/api'
+import { createRequestGuard } from '@/utils/request-guard'
 
 export interface BlacklistItem {
   gid: number
@@ -102,7 +103,10 @@ export const useFriendStore = defineStore('friend', () => {
   // 每个好友各自一条请求序号：全局共用会在「展开 A 后立刻展开 B」时把 A 的结果丢弃，
   // 并让 A 的 loading 永远停在 true（渲染层一直转圈）。
   const friendLandRequestSeq = new Map<string, number>()
-  let interactionItemsRequestSequence = 0
+  const interactionItemsGuard = createRequestGuard()
+  // 好友列表 / 缓存 / 访客记录 / 黑名单共用的请求序号：切号时递增作废旧响应，
+  // 同账号的连续请求也只认最后一次。原来这四个 fetch 完全没有守卫。
+  const friendListGuard = createRequestGuard()
 
   function normalizeLandId(value: unknown) {
     const text = String(value ?? '').trim()
@@ -309,27 +313,30 @@ export const useFriendStore = defineStore('friend', () => {
   async function fetchFriends(accountId: string, forceSync = false) {
     if (!accountId)
       return
+    const ticket = friendListGuard.next()
     loading.value = true
     try {
       const res = await api.get('/api/friends', {
         headers: { 'x-account-id': accountId },
         params: forceSync ? { forceSync: 'true' } : {},
       })
-      if (res.data.ok) {
+      if (!friendListGuard.isStale(ticket) && res.data.ok) {
         friends.value = res.data.data || []
       }
     }
     finally {
-      loading.value = false
+      if (!friendListGuard.isStale(ticket))
+        loading.value = false
     }
   }
 
   async function fetchFriendsCache(accountId: string) {
     if (!accountId)
       return
+    const ticket = friendListGuard.next()
     try {
       const res = await api.get('/api/friends/cache', { headers: { 'x-account-id': accountId } })
-      if (res.data.ok && Array.isArray(res.data.data) && res.data.data.length > 0)
+      if (!friendListGuard.isStale(ticket) && res.data.ok && Array.isArray(res.data.data) && res.data.data.length > 0)
         friends.value = res.data.data
     }
     catch { /* 仅缓存刷新失败时保持现有列表 */ }
@@ -338,6 +345,7 @@ export const useFriendStore = defineStore('friend', () => {
   async function fetchInteractRecords(accountId: string) {
     if (!accountId)
       return
+    const ticket = friendListGuard.next()
     interactLoading.value = true
     interactError.value = ''
     interactRecords.value = []
@@ -346,6 +354,8 @@ export const useFriendStore = defineStore('friend', () => {
       const res = await api.get('/api/interact-records', {
         headers: { 'x-account-id': accountId },
       })
+      if (friendListGuard.isStale(ticket))
+        return
       if (res.data.ok) {
         interactRecords.value = Array.isArray(res.data.data) ? res.data.data : []
       }
@@ -354,21 +364,24 @@ export const useFriendStore = defineStore('friend', () => {
       }
     }
     catch (error: any) {
-      interactError.value = getApiErrorMessage(error, '加载访客记录失败')
+      if (!friendListGuard.isStale(ticket))
+        interactError.value = getApiErrorMessage(error, '加载访客记录失败')
     }
     finally {
-      interactLoading.value = false
+      if (!friendListGuard.isStale(ticket))
+        interactLoading.value = false
     }
   }
 
   async function fetchBlacklist(accountId: string) {
     if (!accountId)
       return
+    const ticket = friendListGuard.next()
     try {
       const res = await api.get('/api/friend-blacklist', {
         headers: { 'x-account-id': accountId },
       })
-      if (res.data.ok) {
+      if (!friendListGuard.isStale(ticket) && res.data.ok) {
         blacklist.value = res.data.data || []
       }
     }
@@ -492,6 +505,15 @@ export const useFriendStore = defineStore('friend', () => {
 
   function resetFriendLandState() {
     friendLandRequestSeq.clear()
+    // 切号时作废所有在途的好友/黑名单/访客请求，并清掉上一个账号的残留数据；
+    // Friends.vue 的切号 watch 会紧接着重新 loadData()。
+    friendListGuard.invalidate()
+    friends.value = []
+    blacklist.value = []
+    interactRecords.value = []
+    loading.value = false
+    interactLoading.value = false
+    interactError.value = ''
     friendLands.value = {}
     friendLandsLoading.value = {}
     friendLandsError.value = {}
@@ -550,7 +572,7 @@ export const useFriendStore = defineStore('friend', () => {
     const requestedAccountId = String(accountId || '').trim()
     if (!requestedAccountId)
       return false
-    const sequence = ++interactionItemsRequestSequence
+    const ticket = interactionItemsGuard.next()
     if (interactionItemsAccountId.value !== requestedAccountId) {
       interactionItems.value = []
       interactionItemsAccountId.value = requestedAccountId
@@ -562,7 +584,7 @@ export const useFriendStore = defineStore('friend', () => {
         headers: { 'x-account-id': requestedAccountId },
         skipErrorToast: true,
       } as any)
-      if (sequence !== interactionItemsRequestSequence)
+      if (interactionItemsGuard.isStale(ticket))
         return false
       if (!res.data?.ok) {
         interactionItems.value = []
@@ -573,14 +595,14 @@ export const useFriendStore = defineStore('friend', () => {
       return true
     }
     catch (error: any) {
-      if (sequence !== interactionItemsRequestSequence)
+      if (interactionItemsGuard.isStale(ticket))
         return false
       interactionItems.value = []
       interactionItemsError.value = getApiErrorMessage(error, '无法读取特殊互动道具')
       return false
     }
     finally {
-      if (sequence === interactionItemsRequestSequence)
+      if (!interactionItemsGuard.isStale(ticket))
         interactionItemsLoading.value = false
     }
   }
@@ -663,7 +685,7 @@ export const useFriendStore = defineStore('friend', () => {
   }
 
   function resetInteractionState() {
-    interactionItemsRequestSequence++
+    interactionItemsGuard.invalidate()
     interactionItems.value = []
     interactionItemsLoading.value = false
     interactionItemsError.value = ''

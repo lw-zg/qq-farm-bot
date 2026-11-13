@@ -1,12 +1,124 @@
 {
   "major": 3,
-  "minor": 23,
-  "patch": 2,
-  "build": 162,
-  "version": "3.23.2",
-  "updatedAt": "2026-11-12T22:09:06.366Z",
+  "minor": 25,
+  "patch": 9,
+  "build": 178,
+  "version": "3.25.9",
+  "updatedAt": "2026-11-13T19:19:27.188Z",
   "lastCommit": "—",
   "history": [
+    {
+      "version": "3.25.9",
+      "build": 178,
+      "date": "2026-11-14",
+      "summary": "测试不再往真实数据目录扔临时文件",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.25.8",
+      "build": 177,
+      "date": "2026-11-14",
+      "summary": "修复 Windows 上原子写偶发 EPERM 导致配置与当日状态丢失的问题",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.25.7",
+      "build": 176,
+      "date": "2026-11-14",
+      "summary": "修复单个 HTTP 请求可打死主进程的问题，并补上真实冒烟与前端逻辑测试",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.25.6",
+      "build": 175,
+      "date": "2026-11-14",
+      "summary": "补齐剩余 5 个零测试模块的 67 条测试，并修掉两处同类边界问题",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.25.5",
+      "build": 173,
+      "date": "2026-11-14",
+      "summary": "为 8 个零测试的高风险模块补 123 条测试，并修复好友 GID 归一化放行 Infinity",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.25.3",
+      "build": 172,
+      "date": "2026-11-14",
+      "summary": "修复请求参数以 Infinity 绕过校验，并把外部输入面收成清单闸门",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.25.2",
+      "build": 171,
+      "date": "2026-11-13",
+      "summary": "参数与边界复查：间隔上限缺失、定时器延时溢出、Infinity 放行与管理端口校验",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.25.1",
+      "build": 170,
+      "date": "2026-11-13",
+      "summary": "重构切号竞态：27 处手写序号计数器全部收口到统一请求守卫",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.25.0",
+      "build": 169,
+      "date": "2026-11-13",
+      "summary": "新增防复发门禁：把「未处理 Promise」这类反复出现的问题变成写的时候就报错",
+      "commit": "—",
+      "type": "minor"
+    },
+    {
+      "version": "3.23.8",
+      "build": 168,
+      "date": "2026-11-13",
+      "summary": "全仓完整性复查（第四轮，含前四轮回归）：修复进程致命拒绝、启动失败卡死与切号串数据",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.23.7",
+      "build": 167,
+      "date": "2026-11-13",
+      "summary": "修复账号运行状态从不更新：补齐后端状态机，登录中 / 等待重登 / 停止中终于可见",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.23.6",
+      "build": 166,
+      "date": "2026-11-13",
+      "summary": "全仓完整性复查：修复「全部账号」日志排序失效、停机不清活动主循环与巡检周期被反复重置",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.23.5",
+      "build": 165,
+      "date": "2026-11-13",
+      "summary": "全仓完整性复查：修复统计跨日错位、好友帮忙自锁与 2×2 预留组误释放",
+      "commit": "—",
+      "type": "patch"
+    },
+    {
+      "version": "3.23.3",
+      "build": 163,
+      "date": "2026-11-13",
+      "summary": "全仓完整性复查：修复凭证吊销闸门失效、续期窗口被推迟与续期异常打断主进程",
+      "commit": "—",
+      "type": "patch"
+    },
     {
       "version": "3.23.2",
       "build": 162,

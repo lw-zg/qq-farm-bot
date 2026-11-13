@@ -7,6 +7,7 @@ import type {
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import api, { getApiErrorMessage, normalizeApiErrorMessage } from '@/api'
+import { createRequestGuard } from '@/utils/request-guard'
 
 export type FertilizerType = 'normal' | 'organic'
 
@@ -92,9 +93,22 @@ export const useFarmStore = defineStore('farm', () => {
   const interactionUsedLandIds = ref<Record<string, string[]>>({})
   const fertilizePending = ref(false)
   const fertilizeError = ref('')
-  let landRequestSequence = 0
-  let fertilizeRequestSequence = 0
-  let interactionItemsRequestSequence = 0
+  /**
+   * 操作后的「补刷」必须先确认账号没被切走。
+   * 原来 POST 成功后无条件 `await fetchLands(accountId)` 用的是操作发起时的旧入参；
+   * 这次补刷是一笔全新请求，会拿到最新序号、绕过 resetLandState 的守卫，
+   * 把 A 的土地写进已切到 B 的面板，还会重建 60s TTL 的 landOverlay。
+   */
+  function accountWasSwitched(accountId: string): boolean {
+    if (typeof localStorage === 'undefined')
+      return false
+    const current = String(localStorage.getItem('current_account_id') || '').trim()
+    return !!current && current !== accountId
+  }
+
+  const landGuard = createRequestGuard()
+  const fertilizeGuard = createRequestGuard()
+  const interactionItemsGuard = createRequestGuard()
   let landOverlay: { lands: any[], effects: FriendInteractionEffectDto[], updatedAt: number } | null = null
 
   function normalizeLandId(value: unknown) {
@@ -173,7 +187,7 @@ export const useFarmStore = defineStore('farm', () => {
   async function fetchLands(accountId: string) {
     if (!accountId)
       return false
-    const sequence = ++landRequestSequence
+    const ticket = landGuard.next()
     loading.value = true
     loaded.value = false
     error.value = ''
@@ -182,7 +196,7 @@ export const useFarmStore = defineStore('farm', () => {
         headers: { 'x-account-id': accountId },
         skipErrorToast: true,
       } as any)
-      if (sequence !== landRequestSequence)
+      if (landGuard.isStale(ticket))
         return false
       if (data && data.ok) {
         lands.value = applyLandOverlay(data.data.lands || [])
@@ -197,7 +211,7 @@ export const useFarmStore = defineStore('farm', () => {
       return false
     }
     catch (cause: any) {
-      if (sequence !== landRequestSequence)
+      if (landGuard.isStale(ticket))
         return false
       career.value = null
       socialEvents.value = []
@@ -205,7 +219,7 @@ export const useFarmStore = defineStore('farm', () => {
       return false
     }
     finally {
-      if (sequence === landRequestSequence) {
+      if (!landGuard.isStale(ticket)) {
         loaded.value = true
         loading.value = false
       }
@@ -213,8 +227,8 @@ export const useFarmStore = defineStore('farm', () => {
   }
 
   function resetLandState() {
-    landRequestSequence++
-    fertilizeRequestSequence++
+    landGuard.invalidate()
+    fertilizeGuard.invalidate()
     lands.value = []
     summary.value = {}
     socialEvents.value = []
@@ -237,7 +251,7 @@ export const useFarmStore = defineStore('farm', () => {
   }
 
   function resetInteractionState() {
-    interactionItemsRequestSequence++
+    interactionItemsGuard.invalidate()
     interactionItems.value = []
     interactionItemsLoading.value = false
     interactionItemsError.value = ''
@@ -251,7 +265,7 @@ export const useFarmStore = defineStore('farm', () => {
     const requestedAccountId = String(accountId || '').trim()
     if (!requestedAccountId)
       return false
-    const sequence = ++interactionItemsRequestSequence
+    const ticket = interactionItemsGuard.next()
     if (interactionItemsAccountId.value !== requestedAccountId) {
       interactionItems.value = []
       interactionItemsAccountId.value = requestedAccountId
@@ -263,7 +277,7 @@ export const useFarmStore = defineStore('farm', () => {
         headers: { 'x-account-id': requestedAccountId },
         skipErrorToast: true,
       } as any)
-      if (sequence !== interactionItemsRequestSequence)
+      if (interactionItemsGuard.isStale(ticket))
         return false
       if (!res.data?.ok) {
         interactionItems.value = []
@@ -274,14 +288,14 @@ export const useFarmStore = defineStore('farm', () => {
       return true
     }
     catch (cause: any) {
-      if (sequence !== interactionItemsRequestSequence)
+      if (interactionItemsGuard.isStale(ticket))
         return false
       interactionItems.value = []
       interactionItemsError.value = getApiErrorMessage(cause, '无法读取可用的互动道具')
       return false
     }
     finally {
-      if (sequence === interactionItemsRequestSequence)
+      if (!interactionItemsGuard.isStale(ticket))
         interactionItemsLoading.value = false
     }
   }
@@ -348,7 +362,7 @@ export const useFarmStore = defineStore('farm', () => {
     if (!accountId || !landId || fertilizePending.value)
       return false
     fertilizePending.value = true
-    const sequence = ++fertilizeRequestSequence
+    const ticket = fertilizeGuard.next()
     fertilizeError.value = ''
     try {
       const res = await api.post('/api/farm/fertilize', {
@@ -358,7 +372,7 @@ export const useFarmStore = defineStore('farm', () => {
         headers: { 'x-account-id': accountId },
         skipErrorToast: true,
       } as any)
-      if (sequence !== fertilizeRequestSequence)
+      if (fertilizeGuard.isStale(ticket))
         return false
       if (!res.data?.ok) {
         fertilizeError.value = userFacingFertilizeError(res.data)
@@ -372,13 +386,13 @@ export const useFarmStore = defineStore('farm', () => {
       return result
     }
     catch (cause: any) {
-      if (sequence !== fertilizeRequestSequence)
+      if (fertilizeGuard.isStale(ticket))
         return false
       fertilizeError.value = userFacingFertilizeError(cause)
       return false
     }
     finally {
-      if (sequence === fertilizeRequestSequence)
+      if (!fertilizeGuard.isStale(ticket))
         fertilizePending.value = false
     }
   }
@@ -386,7 +400,7 @@ export const useFarmStore = defineStore('farm', () => {
   async function fertilizeAll(accountId: string, fertilizerType: FertilizerType, landIds?: number[]) {
     if (!accountId || fertilizePending.value)
       return false
-    const sequence = ++fertilizeRequestSequence
+    const ticket = fertilizeGuard.next()
     fertilizePending.value = true
     fertilizeError.value = ''
     try {
@@ -394,7 +408,7 @@ export const useFarmStore = defineStore('farm', () => {
         headers: { 'x-account-id': accountId },
         skipErrorToast: true,
       } as any)
-      if (sequence !== fertilizeRequestSequence)
+      if (fertilizeGuard.isStale(ticket))
         return false
       if (!res.data?.ok) {
         fertilizeError.value = userFacingFertilizeError(res.data)
@@ -405,13 +419,13 @@ export const useFarmStore = defineStore('farm', () => {
       return result
     }
     catch (cause: any) {
-      if (sequence !== fertilizeRequestSequence)
+      if (fertilizeGuard.isStale(ticket))
         return false
       fertilizeError.value = userFacingFertilizeError(cause)
       return false
     }
     finally {
-      if (sequence === fertilizeRequestSequence)
+      if (!fertilizeGuard.isStale(ticket))
         fertilizePending.value = false
     }
   }
@@ -458,8 +472,10 @@ export const useFarmStore = defineStore('farm', () => {
     if (!res.data?.ok) {
       throw new Error(getApiErrorMessage(res.data, '农场操作失败'))
     }
-    landOverlay = null
-    await fetchLands(accountId)
+    if (!accountWasSwitched(accountId)) {
+      landOverlay = null
+      await fetchLands(accountId)
+    }
     const result = res.data?.data || { hadWork: false, actions: [] }
     if (result && typeof result.message === 'string')
       result.message = normalizeApiErrorMessage(result.message)
@@ -476,8 +492,10 @@ export const useFarmStore = defineStore('farm', () => {
     } as any)
     if (!res.data?.ok)
       throw new Error(getApiErrorMessage(res.data, '铲除作物失败'))
-    landOverlay = null
-    await fetchLands(accountId)
+    if (!accountWasSwitched(accountId)) {
+      landOverlay = null
+      await fetchLands(accountId)
+    }
     return res.data.data ?? true
   }
 

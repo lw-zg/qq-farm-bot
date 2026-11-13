@@ -8,6 +8,7 @@ const { performance } = require('node:perf_hooks');
 const { getPlantNameBySeedId, formatGrowTime, getPlantGrowTime, getAllSeeds, getPlantBySeedId } = require('../../config/gameConfig');
 const { getPreferredSeed, getAutomation, getPlantingStrategy, getBagSeedPriority, getBagSeedMultiLandReservationEnabled, getBagSeedLandTypes, getBagSeedFallbackStrategy, getPrioritize2x2Crops, getPlantDelaySeconds } = require('../../models/store');
 const { PlantPhase } = require('../../config/config');
+const { readIdOr } = require('../../utils/input-guards');
 const { getUserState, getWsErrorState, sendMsgAsync } = require('../../utils/network');
 const { toNum, getServerTimeSec, log, logWarn, sleep } = require('../../utils/utils');
 const { types } = require('../../utils/proto');
@@ -30,6 +31,8 @@ const {
     createFailureCooldown,
     buildPlantingRoundSignature,
     createPlantingRoundGate,
+    getLayoutClearMetrics,
+    isQualifiedForWaiting,
 } = require('./reservation-window');
 const {
     ALL_FERTILIZER_LAND_TYPES,
@@ -620,10 +623,19 @@ async function runPlantFromBagSeeds(landsToPlant: any[], landTypeById?: Map<numb
                 if (reservation) {
                     reservationWindow.release(String(reservation.key), occupants);
                 } else if (canReserve) {
-                    // 之前在等的组已经不合格：逐组释放并记住各自占用者，防资格恢复后立刻重圈。
+                    // 清理「确实已经不合格」的等待组。注意不能因为当前这个种子凑不齐布局，
+                    // 就把所有活跃等待组一律释放：activeKeys() 是整个 worker 的全局账本，
+                    // 里面还有别的种子仍在 60 秒有效窗口内的等待组。误释放会把它们打成
+                    // released 态，而 occupants 不变时 evaluate 会一直返回 released，
+                    // 该组到换季前再也无法重新圈地，2×2 目标布局被彻底放弃。
+                    // 逐组用真实占用者重算：整组已空出（可以立刻种）或已超出等待窗口，才释放。
                     for (const key of reservationWindow.activeKeys()) {
                         const ids = key.split(',').map(Number);
-                        reservationWindow.release(key, occupantsOf(ids, landMap, qualifyEmptyIds));
+                        const groupOccupants = occupantsOf(ids, landMap, qualifyEmptyIds);
+                        const metrics = getLayoutClearMetrics(ids, landMap, qualifyEmptyIds, nowSec);
+                        if (groupOccupants.size === 0 || !isQualifiedForWaiting(metrics, nowSec)) {
+                            reservationWindow.release(key, groupOccupants);
+                        }
                     }
                 }
                 clearRegisteredLayout(seed.seedId);
@@ -1536,8 +1548,10 @@ async function runFertilizerByConfig(plantedLands: any[] = [], options: { skipNo
 }
 
 async function fertilizeOwnLand(landIdInput: unknown, fertilizerTypeInput: unknown): Promise<any> {
-    const landId = toNum(landIdInput);
-    if (!landId || landId <= 0) {
+    // `toNum` 只做 Long→number 的转换：`Infinity || 0` 仍是 Infinity，`<= 0` 也拦不住，
+    // 于是越界编号会一路编进 int64 字段并静默失效。
+    const landId = readIdOr(landIdInput, 'landId', 0);
+    if (!landId) {
         throw new Error('地块编号无效');
     }
 
