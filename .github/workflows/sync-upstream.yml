@@ -1,0 +1,93 @@
+name: Sync Upstream
+
+# 跟随上游自动更新：每天把 BUGDey/qq-farm-bot 的新提交合并进本仓库 main 分支。
+# 上游换地址时，只需改下面 UPSTREAM_REPO 这一处（或在 Actions 页面手动触发时填 upstream_repo）。
+# 说明：只有在 lw-zg/qq-farm-bot 里才会执行，避免被其他 fork 误触发。
+
+on:
+  schedule:
+    # UTC 16:17 = 北京时间次日 00:17
+    - cron: '17 16 * * *'
+  workflow_dispatch:
+    inputs:
+      upstream_repo:
+        description: '上游仓库（owner/repo），留空则用默认值'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+# 同一时间只跑一个同步任务，避免两次合并互相踩踏
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_REPO: ${{ github.event.inputs.upstream_repo || 'BUGDey/qq-farm-bot' }}
+  UPSTREAM_BRANCH: main
+  TARGET_BRANCH: main
+
+jobs:
+  sync:
+    name: 合并上游更新
+    if: github.repository == 'lw-zg/qq-farm-bot'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # 必须完整历史（fetch-depth: 0），浅克隆没有 merge-base，合并会失败
+      - name: 检出 main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 配置 git 身份
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: 拉取上游
+        run: |
+          set -euo pipefail
+          git remote remove upstream 2>/dev/null || true
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch --prune upstream "refs/heads/${UPSTREAM_BRANCH}:refs/remotes/upstream/${UPSTREAM_BRANCH}"
+          echo "上游 ${UPSTREAM_REPO} 最新提交："
+          git log -1 --format='  %h %ad %s' --date=format:'%Y-%m-%d %H:%M' "upstream/${UPSTREAM_BRANCH}"
+
+      - name: 判断是否需要同步
+        id: check
+        run: |
+          set -euo pipefail
+          if git merge-base --is-ancestor "upstream/${UPSTREAM_BRANCH}" HEAD; then
+            echo "need_sync=false" >> "$GITHUB_OUTPUT"
+            echo "已包含上游全部提交，无需同步。"
+          else
+            COUNT="$(git rev-list --count "HEAD..upstream/${UPSTREAM_BRANCH}")"
+            echo "need_sync=true" >> "$GITHUB_OUTPUT"
+            echo "发现上游新提交 ${COUNT} 个："
+            git log --oneline "HEAD..upstream/${UPSTREAM_BRANCH}" | head -20
+          fi
+
+      - name: 合并上游
+        if: steps.check.outputs.need_sync == 'true'
+        run: |
+          set -euo pipefail
+          if git merge --no-edit "upstream/${UPSTREAM_BRANCH}"; then
+            echo "合并完成。"
+          else
+            echo "::error::上游合并出现冲突，已中止（仓库未改动）。以下是冲突文件："
+            git diff --name-only --diff-filter=U || true
+            git merge --abort || true
+            echo "::error::请在本地把 upstream/${UPSTREAM_REPO} 并入 ${TARGET_BRANCH} 后推送，或手动处理冲突。"
+            exit 1
+          fi
+
+      - name: 推送到本仓库
+        if: steps.check.outputs.need_sync == 'true'
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:${TARGET_BRANCH}"
+          echo "已推送：$(git log -1 --format='%h %s')"
