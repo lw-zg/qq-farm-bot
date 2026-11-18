@@ -9,6 +9,7 @@ const { analyzeLands, resolveRemovableHarvestedLands } = require('./farm-land-an
 const { runFertilizerByConfig } = require('./farm-fertilizer');
 const { autoPlantEmptyLands } = require('./planting-service');
 const { startFertilizerBuyCheckTimer, stopFertilizerBuyCheckTimer } = require('./farm-scheduler');
+const { sellAllFruits } = require('./warehouse');
 
 // ─── 状态标记 ───
 
@@ -19,9 +20,43 @@ let externalSchedulerMode = false;
 let lastPushTime = 0;
 let shouldRefresh2x2Plan = true;
 
+// 仓库已满属于自动化反复触发收获的已知状态，做节流 + 退避，避免每 5 秒刷屏。
+const WAREHOUSE_FULL_LOG_WINDOW_MS = 5 * 60 * 1000; // 同一错误 5 分钟只记一次
+const WAREHOUSE_FULL_PAUSE_MS = 60 * 1000;          // 仓库满时暂停该农场巡查 60 秒
+const warehouseFullState = { lastAt: 0, count: 0 };
+let farmPausedUntil = 0;
+
 const farmScheduler = createScheduler('farm');
+const nowMs = () => Date.now();
 
 // ─── 辅助函数 ───
+
+/** 是否为「仓库已满」类错误（自动化反复收获的已知状态） */
+function isWarehouseFullError(err) {
+  const msg = String(err && err.message || '');
+  return msg.includes('仓库已满') || /\bcode=1003001\b/.test(msg);
+}
+
+/**
+ * 仓库已满：降噪 + 退避。
+ * 同一错误 5 分钟内只记录一次（带累计次数），同时暂停农场巡查 60 秒，
+ * 让自动出售/手动清理有时间生效，避免每 5 秒重复触发同一错误。
+ */
+function handleWarehouseFull() {
+  const ts = nowMs();
+  farmPausedUntil = ts + WAREHOUSE_FULL_PAUSE_MS;
+  warehouseFullState.count += 1;
+  const shouldLog = ts - warehouseFullState.lastAt >= WAREHOUSE_FULL_LOG_WINDOW_MS;
+  if (shouldLog) {
+    warehouseFullState.lastAt = ts;
+    logWarn('收获', `仓库已满，本次收获跳过；请清理仓库或调整自动出售设置（本轮共跳过 ${warehouseFullState.count} 次，5 分钟内仅提示一次）`, {
+      module: 'farm', event: '收获作物', result: 'warehouse_full', code: 1003001
+    });
+  }
+  farmScheduler.setTimeoutTask('farm_warehouse_full_pause', WAREHOUSE_FULL_PAUSE_MS, async () => {
+    if (farmLoopRunning && !externalSchedulerMode) scheduleNextFarmCheck(1000);
+  });
+}
 
 /** 判断是否为临时性网络错误 */
 function isTransientNetworkError(err) {
@@ -44,6 +79,8 @@ async function checkFarm() {
   if (isCheckingFarm || !userState.gid || !isAutomationOn('farm') || !isConnected()) {
     return false;
   }
+  // 仓库满后退避窗口内跳过本轮巡查，给自动出售/清理留出时间。
+  if (nowMs() < farmPausedUntil) return false;
 
   isCheckingFarm = true;
   try {
@@ -126,6 +163,7 @@ async function runFarmOperation(opType) {
   let harvestedLands = [];
   let harvestResult = null;
   let removeResult = null;
+  let warehouseFull = false;
 
   if (opType === 'all' || opType === 'harvest') {
     if (analysis.harvestable.length > 0) {
@@ -139,6 +177,10 @@ async function runFarmOperation(opType) {
         recordOperation('harvest', analysis.harvestable.length);
         harvestedLands = [...analysis.harvestable];
 
+        // 收获后必须先等待自动出售完成，再进入铲除/购种，避免 BuyGoods 在仓库满时继续失败。
+        if (isAutomationOn('sell')) {
+          await sellAllFruits();
+        }
         networkEvents.emit('farmHarvested', {
           count: analysis.harvestable.length,
           landIds: [...analysis.harvestable],
@@ -146,13 +188,21 @@ async function runFarmOperation(opType) {
         });
         require('./capital-mode').handleFarmHarvested();
       } catch (err) {
-        logWarn('收获', err.message, { module: 'farm', event: '收获作物', result: 'error' });
+        if (isWarehouseFullError(err)) {
+          warehouseFull = true;
+          handleWarehouseFull();
+          if (isAutomationOn('sell')) await sellAllFruits();
+        } else {
+          logWarn('收获', `收获失败：${err.message}；本轮已跳过，稍后自动重试`, {
+            module: 'farm', event: '收获作物', result: 'error'
+          });
+        }
       }
     }
   }
 
   // ── 种植 ──
-  if (opType === 'all' || opType === 'plant') {
+  if (!warehouseFull && (opType === 'all' || opType === 'plant')) {
     const emptyLands = [...new Set(analysis.empty)];
     let deadLands = [...new Set(analysis.dead)];
 
