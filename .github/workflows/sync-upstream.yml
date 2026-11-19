@@ -17,6 +17,8 @@ on:
 
 permissions:
   contents: write
+  # 上游可能修改 .github/workflows/*（如 release.yml），推送 workflow 文件必须额外有 workflows: write
+  workflows: write
 
 # 同一时间只跑一个同步任务，避免两次合并互相踩踏
 concurrency:
