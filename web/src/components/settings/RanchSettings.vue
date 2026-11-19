@@ -25,6 +25,7 @@ const modules = [
   { key: 'friends', title: '牧场好友', description: '帮助、照料和好友捣乱', icon: 'i-carbon-user-multiple' },
   { key: 'steal', title: '牧场偷取', description: '根据好友产出时间自动巡查', icon: 'i-carbon-crop-health' },
   { key: 'merchant', title: '兑换集市', description: '使用便便、松果兑换商品', icon: 'i-carbon-store' },
+  { key: 'daily', title: '日常', description: '牧场任务、订单、每日福利与奖励', icon: 'i-carbon-task' },
 ]
 const moduleImages: Record<string, string> = {
   husbandry: 'planting.png',
@@ -32,6 +33,7 @@ const moduleImages: Record<string, string> = {
   friends: 'friends-friendship.png',
   steal: 'steal.png',
   merchant: 'merchant.png',
+  daily: 'activity-task.png',
 }
 const activeInfo = computed(() => modules.find(m => m.key === active.value))
 const policyKeys: Record<string, string[]> = {
@@ -58,6 +60,12 @@ const canOptions = [
   { label: '不使用罐头', value: 'none' },
 ]
 const options = computed(() => [
+  { key: 'autoClaimTasks', label: '自动领取每日、成长任务奖励', capability: 'claimTask', module: 'daily' },
+  { key: 'autoSubmitOrders', label: '自动提交安全物品订单', capability: 'submitOrder', module: 'daily' },
+  { key: 'autoClaimIllustrated', label: '自动领取牧场图鉴奖励', capability: 'claimIllustrated', module: 'daily' },
+  { key: 'autoClaimWeight', label: '自动领取重量积分奖励', capability: 'claimWeight', module: 'daily' },
+  { key: 'autoDailyBenefit', label: '自动领取每日福利（每日 1 次）', capability: 'dailyBenefit', module: 'daily' },
+  { key: 'autoClaimShareReward', label: '每日分享领罐头', capability: 'dailyShareReward', module: 'daily' },
   { key: 'autoPlace', label: '自动入栏', capability: 'place', module: 'husbandry' },
   { key: 'autoAddFeed', label: '自动补充已有牧草', capability: 'addFeed', module: 'feed' },
   { key: 'autoUseCan', label: '自动装填罐头容器', capability: 'useCan', module: 'feed' },
@@ -135,7 +143,15 @@ async function save() {
   loading.value = true
   error.value = ''
   try {
-    const patch = { ...Object.fromEntries(options.value.filter(o => o.module === active.value).map(o => [o.key, draft.value[o.key]])), policy: { mode: 'simple', ...Object.fromEntries((policyKeys[active.value] || []).map(key => [key, policy.value[key]])) } }
+    const isDaily = active.value === 'daily'
+    const switches = Object.fromEntries(moduleOptions(active.value)
+      .filter(o => !isDaily || draft.value[o.key] !== (data.value?.[o.key] === true))
+      .map(o => [o.key, draft.value[o.key]]))
+    if (isDaily && !Object.keys(switches).length) {
+      active.value = ''
+      return
+    }
+    const patch = isDaily ? switches : { ...switches, policy: { mode: 'simple', ...Object.fromEntries((policyKeys[active.value] || []).map(key => [key, policy.value[key]])) } }
     const res = await api.post('/api/ranch/settings', patch, { headers: { 'x-account-id': accountId } })
     if (!res.data.ok)
       throw new Error(res.data.error || '保存失败')
@@ -213,6 +229,9 @@ onUnmounted(() => {
                     <p v-if="option.key === 'autoExchangeOrganicFirst'" class="mt-1.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
                       开启后，便便兑换优先选择 4 小时有机化肥（80012），其次 1 小时有机化肥（80011）；不影响其他兑换商品。
                     </p>
+                    <p v-if="option.key === 'autoClaimShareReward'" class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
+                      在游戏内完成每日首次分享后自动检查并领取罐头（1 小时）×5，不会代你分享。
+                    </p>
                   </div>
                 </div>
               </section>
@@ -236,12 +255,12 @@ onUnmounted(() => {
                   <BaseInput v-if="['smart', 'smart_only', 'smart_normal'].includes(policy.canStrategy)" v-model.number="policy.smartSeconds" label="快成熟判定秒数" type="number" min="30" max="3600" :disabled="loading" />
                 </div>
                 <div class="grid gap-3 sm:grid-cols-3">
-                  <BaseInput v-model.number="policy.grassThresholdPercent" label="牧草余量低于（%）时补满" type="number" min="1" max="100" :disabled="loading" />
-                  <BaseInput v-model.number="policy.feedTargetCount" label="单次补草上限" type="number" min="1" :disabled="loading" />
-                  <BaseInput v-model.number="policy.feedReserveCount" label="牧草预留量" type="number" min="0" :disabled="loading" />
+                  <BaseInput v-model.number="policy.grassThresholdPercent" label="牧草机余量低于（%）时补草" type="number" min="1" max="100" :disabled="loading" />
+                  <BaseInput v-model.number="policy.feedTargetCount" label="单次补草上限" type="number" min="1" max="999999" :disabled="loading" />
+                  <BaseInput v-model.number="policy.feedReserveCount" label="库存牧草预留量" type="number" min="0" max="999999" :disabled="loading" />
                 </div>
                 <p class="text-xs text-gray-500">
-                  栏舍填充率低于阈值时补草，一次补到栏舍上限（受单次上限与预留量约束）；只使用库存牧草，不会用金券自动购买。
+                  开启“自动补充已有牧草”后，牧草机余量低于阈值才补草。补草量取剩余容量、单次上限和扣除预留量后的可用库存中的最小值。只使用库存牧草。罐头使用策略与自动补草独立。
                 </p>
               </section>
               <section v-if="active === 'friends'" class="border border-gray-100 rounded-lg p-4 space-y-3 dark:border-gray-700">
@@ -296,7 +315,7 @@ onUnmounted(() => {
               </p>
             </div>
           </div>
-          <BaseSwitch :aria-label="`${module.title}自动化`" :model-value="enabledCount(module.key) > 0" :disabled="props.readonly || loading || !data || pending.has(account.currentAccountId)" @update:model-value="toggleModule(module.key, !!$event)" />
+          <BaseSwitch v-if="module.key !== 'daily'" :aria-label="`${module.title}自动化`" :model-value="enabledCount(module.key) > 0" :disabled="props.readonly || loading || !data || pending.has(account.currentAccountId)" @update:model-value="toggleModule(module.key, !!$event)" />
         </div>
         <div class="mt-4 min-h-[56px] flex flex-wrap content-start gap-2">
           <span v-for="option in moduleOptions(module.key).filter(o => data?.[o.key])" :key="option.key" class="max-w-full rounded-md bg-gray-50 px-2.5 py-1 text-xs text-gray-600 dark:bg-gray-900/40 dark:text-gray-300">{{ option.label }}</span>

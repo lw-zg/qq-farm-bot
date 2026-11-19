@@ -6,6 +6,16 @@ const stock = (items, id, usable = false) => (items || []).filter(i => String(i.
 const cap = (...values) => Number(values.map(BigInt).reduce((a, b) => a < b ? a : b));
 const canConfig = new Map(CONFIG.MCCanConfig.map(c => [String(c.id), c]));
 const bucketId = can => can.feed_type === '有机罐头' ? '7004' : '7003';
+function maxGrassRefill(state, facility, policy) {
+    if (!facility?.feedMachine || state.sectionErrors?.warehouse) return 0;
+    const capacity = Number(facility.capacity);
+    const filled = Number(facility.feedMachine.feedCount);
+    if (!Number.isSafeInteger(capacity) || capacity <= 0 || !Number.isSafeInteger(filled) || filled < 0) return 0;
+    if (filled * 100 >= capacity * policy.grassThresholdPercent) return 0;
+    const surplus = stock(state.items, '7001', true) - BigInt(policy.feedReserveCount);
+    if (surplus <= 0n) return 0;
+    return cap(capacity - filled, policy.feedTargetCount, surplus);
+}
 function assertAutomationPolicy(input, p, { state, market, exchangeEnabled = false, simpleExchange = false } = {}) {
     const reject = () => { throw new Error('牧场自动策略已变化或超过库存/保留量/价格限制'); };
     if (['steal', 'friendProduce', 'help', 'stroke', 'putHazard'].includes(input.action)) {
@@ -19,7 +29,7 @@ function assertAutomationPolicy(input, p, { state, market, exchangeEnabled = fal
         if (!can || !p.canItemIds.includes(String(input.itemId)) || input.count > p.canMaxPerRun || stock(state.items, input.itemId, true) - BigInt(input.count) < BigInt(p.canReserveCount) || stock(state.items, bucketId(can)) + BigInt(input.count * can.speed_up_secs) > BigInt(p.bucketTargetSeconds)) reject();
     } else if (input.action === 'addFeed') {
         const machine = state.facilities.find(f => String(f.instId) === String(input.facilityInstId));
-        if (!machine?.feedMachine || Number(machine.feedMachine.feedCount) + input.count > p.feedTargetCount || stock(state.items, '7001', true) - BigInt(input.count) < BigInt(p.feedReserveCount)) reject();
+        if (!Number.isInteger(input.count) || input.count <= 0 || input.count > maxGrassRefill(state, machine, p)) reject();
     } else if (input.action === 'place') {
         if (!p.cubItemIds.includes(String(input.itemId))) reject();
     } else if (input.action === 'buy' || input.action === 'exchange') {
@@ -61,15 +71,11 @@ async function runRanchExtraAutomation(ctx) {
         // 避免每轮巡查都打商城接口；服务端 available 仍是防重复的最终闸门。
         const decision = benefitSchedule.plan({ enabled: true, accountId: ctx.accountId, now: ctx.now ? ctx.now() : Date.now() });
         if (!decision.shouldClaim) return;
-        const benefit = await service.getResource('dailyBenefit');
-        // 服务端说今天已领：本次窗口完成，落盘避免重复查询。
-        if (benefit?.claimed) {
-            benefitSchedule.confirm({ accountId: ctx.accountId, state: decision.state });
-            return;
-        }
-        // 确实可领才发购买；领取后落盘。未下发/暂不可领不落盘，下一窗口再试。
-        if (benefit?.available) {
-            await perform({ action: 'dailyBenefit' });
+        const benefit = await service.getResource('dailyBenefit', { fresh: decision.readOnly || decision.reason === 'first-enable' });
+        if (!enabled('autoDailyBenefit')) return;
+        // An ambiguous Purchase leaves this window open for status checks only.
+        const result = benefit?.available && !decision.readOnly ? await perform({ action: 'dailyBenefit' }) : null;
+        if ((benefit?.claimed === true || result?.reply?.claimed === true) && settings().autoDailyBenefit) {
             benefitSchedule.confirm({ accountId: ctx.accountId, state: decision.state });
         }
     });
@@ -77,18 +83,9 @@ async function runRanchExtraAutomation(ctx) {
         const facilities = (await service.getStatus()).facilities;
         for (const original of facilities.filter(f => f.feedMachine)) {
             if (!enabled('autoAddFeed')) break;
-            const state = await service.getStatus(); const p = policy();
+            const state = await service.getStatus();
             const facility = state.facilities.find(f => String(f.instId) === String(original.instId));
-            if (!facility?.feedMachine) continue;
-            const surplus = stock(state.items, '7001', true) - BigInt(p.feedReserveCount);
-            const capacity = Number(facility.capacity);
-            const filled = Number(facility.feedMachine.feedCount);
-            // 填充率已达阈值就跳过；阈值只决定“要不要补”，补的量仍是补到栏舍上限。
-            const thresholdPercent = Number(p.grassThresholdPercent);
-            if (capacity > 0 && filled * 100 >= capacity * thresholdPercent) continue;
-            const gap = Math.min(capacity, p.feedTargetCount) - filled;
-            if (!(gap > 0) || surplus <= 0n) continue;
-            const count = cap(gap, surplus, 2147483647);
+            const count = maxGrassRefill(state, facility, policy());
             if (count > 0) await perform({ action: 'addFeed', facilityInstId: facility.instId, count });
         }
     });
@@ -231,7 +228,9 @@ async function runRanchExtraAutomation(ctx) {
         let friends, size, start;
         if (continuation?.friendBatch) ({ friends, size, start } = continuation.friendBatch);
         else {
-            const all = (await service.getResource('friends')).friends || [];
+            const roster = await (ctx.readFriendRoster ? ctx.readFriendRoster() : service.getResource('friends'));
+            if (!roster) return; // Saved scan will resume on the next ranch lease.
+            const all = roster.friends || [];
             friends = all.filter(f => !p.friendExcludeGids.includes(String(f.gid)) && (!p.friendIncludeGids.length || p.friendIncludeGids.includes(String(f.gid))));
             if (ctx.maturityPlan) friends = ctx.maturityPlan.select(friends, p.friendBatchSize, settings(), p);
             size = Math.min(friends.length, p.friendBatchSize);
@@ -257,17 +256,24 @@ async function runRanchExtraAutomation(ctx) {
             let hazardsRemaining = hazardQuota(visit.friend);
             for (const ranch of visit.friend?.ranches || []) {
                 const base = { hostGid, ranchId: ranch.ranchInstId };
-                if (enabled('autoHelp') && (!ctx.maturityPlan || ctx.maturityPlan.canHelp(hostGid)) && ranch.hazards?.length) await perform({ ...base, action: 'help' });
+                const stealAvailable = async shelves => {
+                    if (enabled('autoSteal') && (!ctx.maturityPlan || ctx.maturityPlan.canSteal(hostGid))) {
+                        for (const shelf of shelves || []) if (shelf.canSteal) await perform({ ...base, action: 'steal', slotIndex: shelf.slotIndex });
+                    }
+                };
+                // Spend this slice on already-available loot before any optional interaction.
+                await stealAvailable(ranch.shelves);
                 // Production can immediately create stealable shelves. Only consume freshly
                 // queried shelves, never infer loot or retry a completed production write.
-                let stealRanch = ranch;
+                let stealRanch;
                 if (enabled('autoSteal') && (!ctx.maturityPlan || ctx.maturityPlan.canSteal(hostGid))) {
                     for (const animal of ranch.animals || []) if (animal.canTriggerProduce) {
                         const produced = await perform({ ...base, action: 'friendProduce', animalInstId: animal.animalInstId });
                         if (produced) stealRanch = produced.friend?.ranches?.find(r => String(r.ranchInstId) === String(ranch.ranchInstId)) || { shelves: [] };
                     }
                 }
-                if (enabled('autoSteal') && (!ctx.maturityPlan || ctx.maturityPlan.canSteal(hostGid))) for (const shelf of stealRanch.shelves || []) if (shelf.canSteal) await perform({ ...base, action: 'steal', slotIndex: shelf.slotIndex });
+                if (stealRanch) await stealAvailable(stealRanch.shelves);
+                if (enabled('autoHelp') && (!ctx.maturityPlan || ctx.maturityPlan.canHelp(hostGid)) && ranch.hazards?.length) await perform({ ...base, action: 'help' });
                 if (enabled('autoStroke') && (!ctx.maturityPlan || ctx.maturityPlan.canHelp(hostGid))) for (const animal of ranch.animals || []) if (animal.canStroke) await perform({ ...base, action: 'stroke', animalInstId: animal.animalInstId });
                 if (enabled('autoPutHazard') && hazardsRemaining > 0n && (!ctx.maturityPlan || ctx.maturityPlan.canHelp(hostGid))) {
                     const placed = await perform({ ...base, action: 'putHazard' });
