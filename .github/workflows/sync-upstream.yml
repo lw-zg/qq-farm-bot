@@ -17,8 +17,6 @@ on:
 
 permissions:
   contents: write
-  # 上游可能修改 .github/workflows/*（如 release.yml），推送 workflow 文件必须额外有 workflows: write
-  workflows: write
 
 # 同一时间只跑一个同步任务，避免两次合并互相踩踏
 concurrency:
@@ -43,7 +41,8 @@ jobs:
         with:
           ref: ${{ env.TARGET_BRANCH }}
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # 用 PAT 检出，才有权限推送上游带来的 .github/workflows/* 改动
+          token: ${{ secrets.SYNC_TOKEN }}
 
       - name: 配置 git 身份
         run: |
