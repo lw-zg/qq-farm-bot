@@ -74,6 +74,22 @@ function createWorkerManager(deps) {
         ranchConnect: 120000,
         ranchDisconnect: 120000,
         ranchAction: 120000,
+        // 读接口在好友/背包/商店数据量大时会长时间排队：抓包里 SyncAll 单次请求 10.7KB、
+        // 回包 51KB，10~30 秒默认值容易把正常慢读误判成超时。
+        syncFriendsFromGids: 120000,
+        getFriends: 60000,
+        batchGetFriendDogInfo: 90000,
+        fetchFriendsDogInfo: 120000,
+        getFriendLands: 90000,
+        getInteractRecords: 60000,
+        getProtectLogs: 45000,
+        getBagTab: 30000,
+        getShopInfo: 60000,
+        getActivityDiscoverySnapshot: 60000,
+        getActivityGroupSnapshot: 60000,
+        getLands: 45000,
+        getIllustratedList: 45000,
+        getCollectionsSnapshot: 45000,
     };
     const WATCHDOG_MAX_RESTARTS = 3;
     // 微信账号下线提醒的延迟确认窗口：自动刷新 Code（含重启 Worker）实测约需 10 秒上下，
@@ -965,6 +981,31 @@ function createWorkerManager(deps) {
     };
     persistInactiveActivities();
     scheduler.setIntervalTask('inactive_activity_config', WATCHDOG_PING_MS, persistInactiveActivities);
+
+    // 好友号池：每天挑一个空闲的微信账号读一小批等级/犬种（见 services/friend-pool-autoread.js）。
+    // 实际读取在 worker 内执行，会先等自动任务收尾、再暂停好友同步，尽量不打断巡查。
+    const kickFriendPoolAutoRead = () => {
+        try {
+            const { maybeRunDailyAutoRead } = require('../services/friend-pool-autoread');
+            const accountList = (typeof getAccounts === 'function' ? (getAccounts().accounts || []) : [])
+                .map((account) => ({ id: account.id, name: account.name, platform: account.platform }));
+            maybeRunDailyAutoRead({ accounts: accountList, callWorkerApi })
+                .then((result) => {
+                    if (!result) return;
+                    if (result.skipped) {
+                        if (result.reason === '号池资料已齐全') log('好友', '每日自动读取等级：号池资料已齐全，跳过');
+                        return;
+                    }
+                    log('好友', `每日自动读取等级：本轮读取 ${result.read} 条，共用 ${result.accounts.length} 个账号，今日还剩 ${result.remainingToday} 条`);
+                })
+                .catch((error) => log('好友', `每日自动读取等级异常：${error && error.message ? error.message : error}`));
+        } catch (error) {
+            log('好友', `每日自动读取等级异常：${error && error.message ? error.message : error}`);
+        }
+    };
+    // 启动 2 分钟后试一次，之后每 10 分钟轮询：每轮只读几小批，读完当天预算就停
+    scheduler.setTimeoutTask('friend_pool_auto_read_boot', 120000, kickFriendPoolAutoRead);
+    scheduler.setIntervalTask('friend_pool_auto_read', 10 * 60 * 1000, kickFriendPoolAutoRead);
 
     scheduler.setIntervalTask('watchdog_tick', WATCHDOG_PING_MS, () => {
         const now = Date.now();
