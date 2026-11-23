@@ -1,3 +1,26 @@
+# ============================================================================
+# 宿主机网络（host）模式
+# ----------------------------------------------------------------------------
+# 两个服务都用 network_mode: host，容器不再走 docker 桥接网络，而是直接共享
+# 宿主机的网络栈：
+#   - 面板 3007、抓包代理 18000、NapCat WebUI 6099 都直接监听在宿主机上，
+#     所以不再需要 ports 端口映射（host 模式下写了也会被忽略）。
+#   - 容器内 `CAPTURE_ADVERTISE_IPS=auto` 读到的是宿主机真实网卡地址（局域网 /
+#     Tailscale），手机抓包时不用再手填 CAPTURE_ADVERTISE_IPS；桥接模式下这里
+#     读到的是容器内网 172.x，手机是连不上的。
+#   - 两个容器共用同一个网络栈，互相通过 127.0.0.1 访问，因此 NapCat 地址从
+#     http://napcat:6099 改成 http://127.0.0.1:6099（host 模式下没有 compose
+#     的服务名 DNS）。
+#
+# 要求与注意：
+#   - Linux 宿主机可直接使用；Docker Desktop（Windows / macOS）需 4.34+，
+#     并在 Settings → Resources → Network 勾选 Enable host networking。
+#   - host 模式没有端口隔离：NapCat 的 6099 会直接暴露在宿主机所有网卡上
+#     （仍受 NapCat 自带 Token 校验）。只想本机访问时，把
+#     data/napcat/config/webui.json 里的 host 改成 127.0.0.1 再重启 napcat。
+#   - host 模式下 hostname 设置无效，QQ 登录记录里的设备名会取宿主机主机名。
+#   - 想切回原来的桥接模式：git checkout docker-compose.yml 后重新 up -d --build。
+# ============================================================================
 services:
   qq-farm-bot:
     build:
@@ -13,9 +36,8 @@ services:
     container_name: qq-farm-bot
     restart: unless-stopped
 
-    ports:
-      - "3007:3007"               # 管理面板
-      - "18000:18000"             # 抓包登录 MITM 代理端口（默认开启，供手机 Wi-Fi 代理连入）
+    # 直接使用宿主机网络：面板 3007、抓包 MITM 代理 18000 随容器占用宿主机端口
+    network_mode: host
 
     volumes:
       # 数据固定落在项目内的 ./data，与部署位置无关，备份只需打包这一个目录
@@ -30,8 +52,9 @@ services:
       FARM_DATA_DIR: /app/core/data
       CAPTURE_ADVERTISE_IPS: "${CAPTURE_ADVERTISE_IPS:-auto}"
       NAPCAT_LOGIN_ENABLED: "${NAPCAT_LOGIN_ENABLED:-false}"
-      NAPCAT_WEBUI_URL: http://napcat:6099/api
-      NAPCAT_OPENAUTH_URL: http://napcat:6099/plugin/qq-miniapp-openauth/api
+      # host 模式下容器与 NapCat 共用宿主机网络栈，走 127.0.0.1 而不是服务名 napcat
+      NAPCAT_WEBUI_URL: http://127.0.0.1:6099/api
+      NAPCAT_OPENAUTH_URL: http://127.0.0.1:6099/plugin/qq-miniapp-openauth/api
       NAPCAT_MAINTENANCE_DIR: /app/napcat-maintenance
       # ---- 多用户账号与卡密体系 ----
       # 关闭后退回单机模式（auto-login 可用，不做用户校验）
@@ -52,6 +75,7 @@ services:
       # 抓包服务默认开启；可在面板“系统配置 → Code/GID 抓取服务”关闭。
       # 代理端口固定使用 18000：
       # CAPTURE_PORTS: "18000"
+      # host 模式下 auto 已经能识别宿主机网卡，一般不需要再写死；
       # 需要固定对外地址时，在 .env 中设置（局域网 / Tailscale 可同时填写）：
       # CAPTURE_ADVERTISE_IPS=192.168.1.100,100.64.0.2
 
@@ -77,15 +101,16 @@ services:
         NAPCAT_IMAGE: "${NAPCAT_IMAGE:-docker.m.daocloud.io/mlikiowa/napcat-docker:v4.18.42}"
     image: qq-farm-napcat:latest
     container_name: qq-farm-napcat
-    hostname: "${NAPCAT_DEVICE_NAME:-qq-farm-bot}"
     restart: unless-stopped
+
+    # host 模式：NapCat WebUI 直接监听宿主机 6099（不再做 127.0.0.1 端口映射）。
+    # 注意 hostname 在 host 模式下不生效，设备名会退化为宿主机主机名。
+    network_mode: host
+
     environment:
       NAPCAT_UID: "${NAPCAT_UID:-1000}"
       NAPCAT_GID: "${NAPCAT_GID:-1000}"
       NAPCAT_MAINTENANCE_DIR: /app/napcat-maintenance
-    ports:
-      # NapCat WebUI：默认只监听本机，且会走 NapCat 自带的 Token 校验
-      - "${NAPCAT_WEBUI_HOST:-127.0.0.1}:${NAPCAT_WEBUI_PORT:-6099}:6099"
     volumes:
       - ./data/napcat/config:/app/napcat/config
       - ./data/napcat/QQ:/app/.config/QQ
